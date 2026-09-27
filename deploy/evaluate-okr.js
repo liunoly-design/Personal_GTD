@@ -4,11 +4,11 @@ import { dirname } from 'node:path';
 import { openGeminiAnalyzer } from '../src/gemini.js';
 import { openClawGoogleKey } from '../src/openclaw-auth.js';
 
-const draft = '2026 第四季度，年度方向：建立稳定的学习习惯。\n#O1 能独立完成一个小型编程作品\n#KR1 季度末交付一个可运行作品，基线：尚无作品，证据：演示和代码；每周检查。\n每周3小时。策略：边做边学；替代：先完整上课。风险：课程挤占实践；停止条件：连续两周无可运行成果时缩小范围。待决：具体作品题材。';
+import { sampleDraft as draft } from '../examples/okr-sample.js';
 const samples = [
-  { name: 'background', stage: 'background', answer: '合成情况：工作日忙，每周可投入3小时，希望学编程做一个小作品。上次整套课程没坚持，不能牺牲睡眠。', recentLog: '', currentGoals: '', goalsTruncated: false },
-  { name: 'challenge', stage: 'okr', answer: '这个季度做一个小作品，先选最小功能，每周3小时。基线是尚无作品。希望讨论最强反对理由和替代策略。', recentLog: draft, currentGoals: '', goalsTruncated: false },
-  { name: 'ready', stage: 'challenge', answer: '接受先做最小作品；我回应风险：不再追求上完课程，每周做演示，连续两周没有成果就缩小范围。题材选番茄钟。请整理完整草案给我确认。', recentLog: draft + '\n已审视：完成课程未必能独立开发，替代路径是先做最小作品。', currentGoals: '', goalsTruncated: false },
+  { name: 'background', stage: 'background', answer: '合成情况：2026第四季度，10月1日到12月31日，每周两小时，希望改善体力，不能牺牲睡眠。', workingDraft: null, recentLog: '', currentGoals: '', goalsTruncated: false },
+  { name: 'challenge', stage: 'okr', answer: '这三个结果已逐项讨论，请先质询最重要的风险。', workingDraft: draft, recentLog: draft, currentGoals: '', goalsTruncated: false },
+  { name: 'ready', stage: 'challenge', answer: '我回应风险：指标不是全部，还要对照日常生活的改善；持续不适时暂停并调整。请整理完整草案给我确认。', workingDraft: draft, recentLog: draft, currentGoals: '', goalsTruncated: false },
 ];
 let model;
 try {

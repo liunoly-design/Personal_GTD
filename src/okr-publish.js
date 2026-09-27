@@ -28,7 +28,7 @@ export async function publishOkr({ store, call, binding, logNote, key, fingerpri
   }
   if (op.phase === 'log-writing') {
     const saved = await call({ ...request('read'), noteId: op.logId });
-    if (saved.tagsComplete === false || saved.id !== op.logId || !saved.plaintext.includes(op.marker) || !saved.plaintext.includes(op.text)
+    if (saved.tagsComplete === false || saved.headingsComplete === false || saved.id !== op.logId || !saved.plaintext.includes(op.marker) || !saved.plaintext.includes(op.text)
       || !saved.plaintext.includes(op.logPlaintext)) throw new Error('UPDATE_RESULT_UNKNOWN');
     save('latest-new');
   }
@@ -49,7 +49,7 @@ export async function publishOkr({ store, call, binding, logNote, key, fingerpri
     store.set('publication', op);
   }
   const latest = await call({ ...request('read'), noteId: op.latestId });
-  if (latest.tagsComplete === false || latest.id !== op.latestId || !latest.plaintext.includes(op.marker) || !latest.plaintext.includes(op.text)) throw new Error('UPDATE_RESULT_UNKNOWN');
+  if (latest.tagsComplete === false || latest.headingsComplete === false || latest.id !== op.latestId || !latest.plaintext.includes(op.marker) || !latest.plaintext.includes(op.text)) throw new Error('UPDATE_RESULT_UNKNOWN');
   op.result = { status: 'okr_finalized', noteId: latest.id, receipt: '已更新 OKR 最新完整稿，确认内容和旧版已保留在 OKR 日志中。' };
   store.set('latest', { id: latest.id });
   save('done');

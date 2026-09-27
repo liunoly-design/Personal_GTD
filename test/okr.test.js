@@ -1,3 +1,4 @@
+import {sampleDraft, sampleGuide} from '../examples/okr-sample.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -182,16 +183,12 @@ test('逐轮引导与原回答一起保存，重启和重投不重复调用模�
   assert.equal(calls,1);
 });
 
-const draftText = '2026 年度方向：健康；第四季度 OKR\n#O1 改善体力\n#KR1 每周运动三次；基线未知，记录运动日志，季度末检查\n每周两小时。策略：短时训练；替代方案：散步。风险：过量；停止条件：持续不适。待决：基线。';
-function stagedGuide() {
-  return async ({stage})=>({stage:({background:'direction',direction:'okr',okr:'challenge',challenge:'ready',ready:'ready'})[stage],
-    summary:'已了解每周两小时与健康方向。',advice:stage==='okr'?'反向审视：全部次数达成但体力没改善怎么办？可先比较散步。':'建议以低成本方案验证，基线未知。',
-    questions:stage==='challenge'||stage==='ready'?[]:['是否接受当前取舍？'],draft:stage==='background'?null:draftText});
-}
+const draftText = sampleDraft;
+const stagedGuide = sampleGuide;
 async function readyDraft(f) {
   await f.session.handle(event('open','open'));
   let result;
-  for(let i=1;i<=4;i++) result=await f.session.handle(event('round'+i,'record','合成回应'+i));
+  for(let i=1;i<=7;i++) result=await f.session.handle(event('round'+i,'record','合成回应'+i));
   return result;
 }
 
@@ -344,4 +341,60 @@ test('最新稿原生标签未完成时保留定稿恢复状态，不重复创�
   complete = true;
   assert.equal((await f.session.handle(confirm)).status, 'okr_finalized');
   assert.equal(f.notes.length, 2);
+});
+
+test('正文成功但标题格式失败不能报保存成功，核对修复后恢复且不重复追加', async t => {
+  const f = fixture(t);
+  await f.session.handle(event('heading-open', 'open'));
+  let complete = false, writes = 0;
+  await f.restart({ bridge: async r => {
+    if (r.command === 'append') writes++;
+    const result = await f.bridge(r);
+    return r.command === 'read' ? { ...result, headingsComplete: complete } : result;
+  } });
+  const input = event('heading-record', 'record', '#O1 合成目标');
+  await assert.rejects(f.session.handle(input), /READBACK_FAILED/);
+  await assert.rejects(f.session.handle(input), /UPDATE_RESULT_UNKNOWN/);
+  complete = true;
+  assert.equal((await f.session.handle(input)).status, 'okr_saved');
+  assert.equal(writes, 1);
+});
+
+test('最新稿标题格式未完成时保留定稿恢复状态，不重复创建第二篇笔记', async t => {
+  const f = fixture(t, { guide: stagedGuide() });
+  const draft = await readyDraft(f);
+  let complete = false;
+  await f.restart({ bridge: async r => {
+    const value = await f.bridge(r);
+    return r.command === 'read' && value.id === 'n2' ? { ...value, headingsComplete: complete } : value;
+  } });
+  const confirm = { ...event('heading-confirm', 'confirm'), confirmVersion: draft.draftVersion };
+  await assert.rejects(f.session.handle(confirm), /UPDATE_RESULT_UNKNOWN/);
+  assert.equal(f.notes.length, 2);
+  complete = true;
+  assert.equal((await f.session.handle(confirm)).status, 'okr_finalized');
+  assert.equal(f.notes.length, 2);
+});
+
+test('每轮只推进一个O或KR，重启后把工作草案传回模型', async t => {
+  const heading = '# 2026 第四季度（2026-10-01 至 2026-12-31）\n## #O1 改善体力';
+  let calls = 0, seen;
+  const guide = async input => {
+    seen = input;
+    calls++;
+    return { stage: calls === 1 ? 'direction' : 'okr', summary: '待用户核对', advice: '先确认目标意义，再讨论关键结果。', questions: ['这个改变为何值得投入？'],
+      draft: calls === 1 ? null : calls === 2 ? heading : heading + '\n### #KR1 结果一\n### #KR2 结果二' };
+  };
+  const f = fixture(t, { guide });
+  await f.session.handle(event('focus-open', 'open'));
+  await f.session.handle(event('focus-1', 'record', '讨论2026第四季度'));
+  await f.session.handle(event('focus-2', 'record', '希望改善体力'));
+  await f.restart();
+  const reply = await f.session.handle(event('focus-3', 'record', '先讨论第一个KR'));
+  assert.equal(seen.workingDraft, heading);
+  assert.equal(reply.status, 'okr_guidance_failed');
+  assert.equal(reply.guidanceFailure, 'MULTIPLE_OKR_ITEMS');
+  const opened = await f.session.handle(event('focus-resume', 'open'));
+  assert.match(opened.receipt, /当前工作草案/);
+  assert.match(opened.receipt, /改善体力/);
 });

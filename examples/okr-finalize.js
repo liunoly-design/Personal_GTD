@@ -1,3 +1,4 @@
+import {sampleDraft, sampleGuide} from './okr-sample.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,17 +19,15 @@ const bridge = async r => {
   }
   return { ...n };
 };
-const draft = '2026 第四季度\n#O1 合成目标：建立运动习惯\n#KR1 合成结果：每周运动三次，基线未知，每周检查运动日志。\n每周两小时；策略：短时运动；替代：散步。风险：挤占睡眠；持续疲惫时调整。';
-const guide = async ({ stage }) => ({ stage: { background: 'direction', direction: 'okr', okr: 'challenge', challenge: 'ready' }[stage],
-  summary: '合成背景：每周两小时，不能影响睡眠。', advice: '比较短时运动与散步；反向审视次数是否能反映真实改善。',
-  questions: stage === 'challenge' ? [] : ['是否接受这一取舍？'], draft: stage === 'background' ? null : draft });
+const draft = sampleDraft;
+const guide = sampleGuide();
 const options = { statePath: join(dir, 'okr.sqlite'), config: { account: 'demo', folder: 'Notes' }, bridge, guide };
 let session = openOkrSession(options);
 const event = (id, action, text = '') => ({ id, action, text, senderId: 'demo', conversationId: 'demo', sentAt: '2026-09-27T10:00:00Z' });
 try {
   await session.handle(event('open', 'open'));
   let ready;
-  for (let i = 1; i <= 4; i++) ready = await session.handle(event('r' + i, 'record', '合成回应' + i));
+  for (let i = 1; i <= 7; i++) ready = await session.handle(event('r' + i, 'record', '合成回应' + i));
   const beforeConfirm = notes.length;
   const confirmation = { ...event('confirm', 'confirm'), confirmVersion: ready.draftVersion };
   const finalized = await session.handle(confirmation);

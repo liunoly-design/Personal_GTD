@@ -31,7 +31,7 @@ function ui(request, timeoutMs) {
       try {
         const response = JSON.parse(output);
         if (!response.ok) {
-          const allowed = /^(CONFLICT|PERMISSION_DENIED|ACCESSIBILITY_DENIED|UNSUPPORTED_NOTE|CAPACITY_EXCEEDED|INVALID_INPUT|EDITOR_UNAVAILABLE|UI_FOCUS_CHANGED|AX_SELECTION_FAILED|TAG_READ_FAILED|TAG_WRITE_FAILED|TAG_DELIMITER_REQUIRED|WRITE_RESULT_UNKNOWN)$/;
+          const allowed = /^(CONFLICT|PERMISSION_DENIED|ACCESSIBILITY_DENIED|UNSUPPORTED_NOTE|CAPACITY_EXCEEDED|INVALID_INPUT|EDITOR_UNAVAILABLE|UI_FOCUS_CHANGED|AX_SELECTION_FAILED|HEADING_FORMAT_FAILED|TAG_READ_FAILED|TAG_WRITE_FAILED|TAG_DELIMITER_REQUIRED|WRITE_RESULT_UNKNOWN)$/;
           throw new Error(allowed.test(response.code) ? response.code : 'APPLE_RESULT_UNKNOWN');
         }
         resolve(response.value);
@@ -64,6 +64,7 @@ export function createNotesBridge({ script: scriptBridge = callNotesScript, edit
       const value = await editor({ command, rawPlaintext: raw.plaintext, ...extra }, remaining());
       const result = snapshot(id, value);
       if (command !== 'read' && !result.tagsComplete) throw new Error('TAG_WRITE_INCOMPLETE');
+      if (command !== 'read' && result.headingsComplete === false) throw new Error('HEADING_FORMAT_FAILED');
       return result;
     }
     if (request.command === 'find') {
@@ -74,7 +75,7 @@ export function createNotesBridge({ script: scriptBridge = callNotesScript, edit
     }
     if (request.command === 'create') {
       const created = await script(request);
-      return read(created.id, 'ensureTags');
+      return read(created.id, 'formatCreated', { expectedPlaintext: created.plaintext });
     }
     if (request.command === 'append' && typeof request.addition !== 'string') throw new Error('INVALID_INPUT');
     if (request.command === 'replace' && typeof request.body !== 'string') throw new Error('INVALID_INPUT');

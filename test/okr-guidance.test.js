@@ -1,3 +1,4 @@
+import { sampleDraft } from '../examples/okr-sample.js';
 import { validateGuidance } from '../src/okr-guidance.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,8 +24,8 @@ test('OKR 模型单轮返回结构化建议，共用预算账本且没有工具�
 });
 
 test('模型草案的误转义换行修正为可读分行，超量问题和无标签草案拒绝', () => {
-  const base={stage:'ready',summary:'背景待核对',advice:'建议先小规模验证',questions:[],draft:'2026季度\\n#O1 合成目标\\n#KR1 合成标准'};
-  assert.match(validateGuidance(base).draft,/季度\n#O1/);
+  const base={stage:'ready',summary:'背景待核对',advice:'建议先小规模验证',questions:[],draft:sampleDraft.replaceAll('\n','\\n')};
+  assert.match(validateGuidance(base).draft,/季度.*\n## #O1/);
   assert.throws(()=>validateGuidance({...base,questions:['a','b','c','d']}),/INVALID_GUIDANCE/);
   assert.throws(()=>validateGuidance({...base,draft:'没有标签的草案'}),/INVALID_GUIDANCE/);
 });

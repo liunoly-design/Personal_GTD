@@ -25,24 +25,33 @@ func value(_ e:AXUIElement) throws -> String {
 }
 func read(_ e:AXUIElement) throws -> (String,[String]) {
     let text=try value(e)
-    let positions=(text as NSString).length
+    let raw=text as NSString
+    var offsets:[Int]=[]
+    for i in 0..<raw.length where raw.character(at:i)==0xfffc {offsets.append(i)}
+    guard offsets.count<=128 else {try fail("UNSUPPORTED_NOTE")}
     var replacements:[(Int,String)]=[]
-    for child in get(e,kAXChildrenAttribute) as? [AXUIElement] ?? [] {
-        let texts=(get(child,kAXChildrenAttribute) as? [AXUIElement] ?? []).compactMap {get($0,kAXValueAttribute) as? String}
-        guard let tag=texts.first,tag.hasPrefix("#"), !tag.contains("\n") else {continue}
-        guard let pv=get(child,kAXPositionAttribute),CFGetTypeID(pv)==AXValueGetTypeID() else {try fail("TAG_READ_FAILED")}
-        var p=CGPoint.zero
-        AXValueGetValue(pv as! AXValue,.cgPoint,&p);p.x+=3;p.y+=3
-        var output:CFTypeRef?
-        let point=AXValueCreate(.cgPoint,&p)!
-        guard AXUIElementCopyParameterizedAttributeValue(e,kAXRangeForPositionParameterizedAttribute as CFString,point,&output) == .success,
-              let out=output,CFGetTypeID(out)==AXValueGetTypeID() else {try fail("TAG_READ_FAILED")}
-        var r=CFRange();AXValueGetValue(out as! AXValue,.cfRange,&r)
-        guard r.location>=0,r.location<positions,(text as NSString).substring(with:NSRange(location:r.location,length:1)) == "\u{fffc}" else {try fail("TAG_READ_FAILED")}
-        replacements.append((r.location,tag))
+    // Notes virtualizes offscreen attachments. Select each exact character range
+    // to expose its native AXAttachment instead of guessing from screen order.
+    let originalSelection=get(e,kAXSelectedTextRangeAttribute)
+    defer {if let original=originalSelection {AXUIElementSetAttributeValue(e,kAXSelectedTextRangeAttribute as CFString,original)}}
+    for offset in offsets {
+        var range=CFRange(location:offset,length:1)
+        let rv=AXValueCreate(.cfRange,&range)!
+        guard AXUIElementSetAttributeValue(e,kAXSelectedTextRangeAttribute as CFString,rv) == .success else {try fail("TAG_READ_FAILED")}
+        var tag:String?
+        for _ in 0..<4 {
+            var out:CFTypeRef?
+            AXUIElementCopyParameterizedAttributeValue(e,"AXAttributedStringForRange" as CFString,rv,&out)
+            if let attr=out as? NSAttributedString,attr.length>0,let attachment=attr.attribute(NSAttributedString.Key("AXAttachment"),at:0,effectiveRange:nil) {
+                let element=attachment as! AXUIElement
+                tag=(get(element,kAXChildrenAttribute) as? [AXUIElement] ?? []).compactMap{get($0,kAXValueAttribute) as? String}.first
+                if tag != nil {break}
+            }
+            Thread.sleep(forTimeInterval:0.03)
+        }
+        guard let name=tag,name.hasPrefix("#"),!name.contains("\n") else {try fail("UNSUPPORTED_NOTE")}
+        replacements.append((offset,name))
     }
-    guard replacements.count<=128,Set(replacements.map{$0.0}).count==replacements.count,
-          text.filter({$0 == "\u{fffc}"}).count==replacements.count else {try fail("UNSUPPORTED_NOTE")}
     let result=NSMutableString(string:text)
     for (offset,tag) in replacements.sorted(by:{$0.0>$1.0}) {result.replaceCharacters(in:NSRange(location:offset,length:1),with:tag)}
     return (result as String,Array(Set(replacements.map{$0.1})).sorted())
@@ -75,6 +84,40 @@ func paste(_ text:String,_ app:NSRunningApplication) throws {
     key(9,.maskCommand);Thread.sleep(forTimeInterval:0.15)
     try front(app)
 }
+func headingRanges(_ text:String)->[(NSRange,[String])] {
+    var offset=0;var result:[(NSRange,[String])]=[]
+    for line in text.components(separatedBy:"\n") {
+        let names=line.hasPrefix("### ") ? ["副标题","Subheading"] : line.hasPrefix("## ") ? ["小标题","Heading"] : line.hasPrefix("# ") ? ["标题","Title"] : []
+        if !names.isEmpty {result.append((NSRange(location:offset,length:(line as NSString).length),names))}
+        offset += (line as NSString).length+1
+    }
+    return result
+}
+func headingStyle(_ e:AXUIElement,_ range:NSRange)->String? {
+    var r=CFRange(location:range.location,length:1);var out:CFTypeRef?
+    AXUIElementCopyParameterizedAttributeValue(e,"AXAttributedStringForRange" as CFString,AXValueCreate(.cfRange,&r)!,&out)
+    guard let attributes=out as? NSAttributedString,attributes.length>0,let style=attributes.attribute(NSAttributedString.Key("AXStyleName"),at:0,effectiveRange:nil) as? String else {return nil}
+    // Collapsible headings append state such as ", 包含段落, 已展开".
+    return style.components(separatedBy:",").first?.trimmingCharacters(in:.whitespaces)
+}
+func formatHeadings(_ e:AXUIElement,_ root:AXUIElement,_ app:NSRunningApplication) throws {
+    let before=try value(e);let headings=headingRanges(before)
+    guard headings.count<=128 else {try fail("CAPACITY_EXCEEDED")}
+    func find(_ node:AXUIElement,_ names:[String],_ depth:Int=0)->AXUIElement? {
+        if depth>6{return nil}
+        if get(node,kAXRoleAttribute) as? String == "AXMenuItem",let name=get(node,kAXTitleAttribute) as? String,names.contains(name){return node}
+        for child in get(node,kAXChildrenAttribute) as? [AXUIElement] ?? [] {if let found=find(child,names,depth+1){return found}}
+        return nil
+    }
+    guard headings.isEmpty || get(root,kAXMenuBarAttribute) != nil else {try fail("HEADING_FORMAT_FAILED")}
+    for (range,names) in headings where !names.contains(headingStyle(e,range) ?? "") {
+        try front(app);try select(e,range)
+        guard let menu=find(get(root,kAXMenuBarAttribute) as! AXUIElement,names),AXUIElementPerformAction(menu,kAXPressAction as CFString) == .success else {try fail("HEADING_FORMAT_FAILED")}
+        Thread.sleep(forTimeInterval:0.03)
+        guard names.contains(headingStyle(e,range) ?? "") else {try fail("HEADING_FORMAT_FAILED")}
+    }
+    guard try value(e)==before else {try fail("WRITE_RESULT_UNKNOWN")}
+}
 func htmlText(_ s:String) throws -> String {
     // Only the application's generated div/br fragments are accepted, not arbitrary HTML.
     let stripped=s.replacingOccurrences(of:"(?i)<br\\s*/?>",with:"\n",options:.regularExpression)
@@ -98,9 +141,9 @@ func run() throws -> [String:Any] {
     var current=try read(e)
     if command != "read" {
         app.activate();Thread.sleep(forTimeInterval:0.1);try front(app)
-        if command == "append" || command == "replace" {
+        if command == "append" || command == "replace" || command == "formatCreated" {
             guard let expected=input["expectedPlaintext"] as? String,expected==current.0 else {try fail("CONFLICT")}
-            let fragment=try htmlText(input["html"] as? String ?? "")
+            let fragment=command == "formatCreated" ? current.0 : try htmlText(input["html"] as? String ?? "")
             var desired=fragment
             if command == "replace" {
                 guard desired.hasPrefix("PGTD OKR 最新稿\n"),desired.contains("PGTD-FINAL-") else {try fail("INVALID_INPUT")}
@@ -112,7 +155,8 @@ func run() throws -> [String:Any] {
                 if !extra.isEmpty {desired += extra.joined(separator:" ")+"\n"}
             }
             let raw=try value(e) as NSString
-            guard current.0.utf16.count+desired.utf16.count<=32768 else {try fail("CAPACITY_EXCEEDED")}
+            let resultingLength = (command == "append" ? current.0.utf16.count : 0)+desired.utf16.count
+            guard resultingLength<=32768 else {try fail("CAPACITY_EXCEEDED")}
             try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length))
             let target=command == "append" ? current.0+desired : desired
             try paste(desired,app)
@@ -141,7 +185,9 @@ func run() throws -> [String:Any] {
             guard current.1.contains(tag) else {try fail("TAG_WRITE_FAILED")}
         }
     }
-    return ["ok":true,"value":["plaintext":current.0,"nativeTags":current.1]]
+    if command != "read" {try formatHeadings(e,root,app)}
+    let complete=headingRanges(try value(e)).allSatisfy{range,names in names.contains(headingStyle(e,range) ?? "")}
+    return ["ok":true,"value":["plaintext":current.0,"nativeTags":current.1,"headingsComplete":complete]]
 }
 do {let result=try run();let data=try JSONSerialization.data(withJSONObject:result,options:.sortedKeys);print(String(data:data,encoding:.utf8)!)}
 catch {let code=(error as? Failure)?.code ?? "APPLE_RESULT_UNKNOWN";print("{\"ok\":false,\"code\":\"\(code)\"}")}

@@ -1,3 +1,4 @@
+import { validateOkrStep } from './okr-structure.js';
 import { publishOkr } from './okr-publish.js';
 import { validateGuidance, guidanceText, stages } from './okr-guidance.js';
 import { randomUUID, createHash } from 'node:crypto';
@@ -77,7 +78,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     if (note.id !== state.noteId || typeof note.body !== 'string' || typeof note.plaintext !== 'string') throw new Error('READBACK_FAILED');
     const pending = store.get('pending');
     if (pending) {
-      if (note.tagsComplete === false || !note.plaintext.includes(pending.marker) || !note.plaintext.includes(pending.text)
+      if (note.tagsComplete === false || note.headingsComplete === false || !note.plaintext.includes(pending.marker) || !note.plaintext.includes(pending.text)
         || !note.plaintext.includes(pending.beforePlaintext)) throw new Error('UPDATE_RESULT_UNKNOWN');
       store.transaction(() => {
         store.set(pending.key, { fingerprint: pending.fingerprint, result: pending.result });
@@ -115,13 +116,14 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
           let timer;
           try {
             const value = await Promise.race([
-              Promise.resolve().then(() => guide({ stage: current.stage, answer: event.text,
+              Promise.resolve().then(() => guide({ stage: current.stage, workingDraft: current.workingDraft ?? null, answer: event.text,
                 currentGoals: latest?.plaintext.slice(0, 8000) ?? '', goalsTruncated: (latest?.plaintext.length ?? 0) > 8000,
                 recentLog: note.plaintext.slice(-3000), logTruncated: note.plaintext.length > 3000,
                 signal: controller.signal })),
               new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('MODEL_TIMEOUT')); }, guideTimeoutMs); }),
             ]);
             analysis = validateGuidance(value);
+            validateOkrStep(current.workingDraft, analysis.draft);
             if (stages.indexOf(analysis.stage) > stages.indexOf(current.stage) + 1) throw new Error('INVALID_TRANSITION');
             if (analysis.stage === 'ready' && (latest?.plaintext.length ?? 0) > 8000) throw new Error('INCOMPLETE_CONTEXT');
             store.set(analysisKey, { phase: 'done', value: analysis, logBody: note.body, latestBody: latest?.body ?? null });
@@ -133,7 +135,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
         }
         if (!analysis && !guidanceFailure) guidanceFailure = oldAnalysis?.reason ?? 'MODEL_INTERRUPTED';
         if (analysis) {
-          discussion = { stage: analysis.stage };
+          discussion = { stage: analysis.stage, workingDraft: analysis.draft ?? store.get('discussion:' + sessionKey)?.workingDraft ?? null };
           if (analysis.stage === 'ready') draft = { version: randomUUID(), text: analysis.draft, owner: sessionKey, latestBody: latest?.body ?? null };
         }
       }
@@ -152,7 +154,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
       await call({ ...request('append'), noteId: state.noteId, expectedBody: note.body,
         addition });
       note = await call({ ...request('read'), noteId: state.noteId });
-      if (note.tagsComplete === false || note.id !== state.noteId || !note.plaintext.includes(marker) || !note.plaintext.includes(entryText)
+      if (note.tagsComplete === false || note.headingsComplete === false || note.id !== state.noteId || !note.plaintext.includes(marker) || !note.plaintext.includes(entryText)
         || !note.plaintext.includes(beforePlaintext)) throw new Error('READBACK_FAILED');
       store.transaction(() => { finish(result); if (discussion) store.set('discussion:' + sessionKey, discussion); store.set('draft', draft); store.set('pending', null); });
       return result;
@@ -162,9 +164,11 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     const preview = clean(note.plaintext);
     const latestBinding = store.get('latest');
     const latest = latestBinding ? await call({ ...request('read'), noteId: latestBinding.id }) : null;
+    const progress = store.get('discussion:' + sessionKey);
+    const resume = progress?.workingDraft ? '\n当前工作草案（待确认）：\n' + progress.workingDraft : '';
     const current = latest ? '\n当前目标：\n' + clean(latest.plaintext).slice(0, 3000) + (latest.plaintext.length > 3000 ? '\n（当前目标预览截断，完整内容在最新稿）' : '') : '';
     return finish({ status: 'okr_open', noteId: note.id,
-      receipt: `已打开 OKR 日志。请介绍个人情况与希望达成的目标，或继续已有记录。回复此消息可保存讨论原文。${current}\n最近日志：\n${preview.length > 3000 ? '（仅显示末尾 3000 字符，完整内容在备忘录）\n' : ''}${preview.slice(-3000)}` });
+      receipt: `已进入 OKR 逐项讨论（grilling 模式）。先明确周期和个人情况，再讨论一个 O，并逐个讨论其 3–5 个 KR。每轮一个核心问题，回答后保存并继续。\n${progress?.workingDraft ? "请先核对下方工作草案，说明当前这一项需要补充或修改什么。" : "这次要制定或回顾哪个年度/季度？起止日期是什么？"}${resume}${current}\n最近日志：\n${preview.length > 3000 ? '（仅显示末尾 3000 字符，完整内容在备忘录）\n' : ''}${preview.slice(-3000)}` });
   }
   return {
     handle(event) {

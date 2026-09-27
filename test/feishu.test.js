@@ -1,3 +1,4 @@
+import { sampleGuide } from '../examples/okr-sample.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -244,13 +245,11 @@ test('飞书显式确认必须回复当前草案，定稿不会创建 Inbox 事�
     if(r.command==='append'){assert.equal(n.body,r.expectedBody);n.body+=r.addition;n.plaintext=n.body.replaceAll('<br>','\n');}
     return {...n};
   };
-  const okrGuide=async({stage})=>({stage:({background:'direction',direction:'okr',okr:'challenge',challenge:'ready'})[stage],
-    summary:'合成背景',advice:'比较替代方案和反对理由',questions:stage==='challenge'?[]:['是否接受？'],
-    draft:stage==='challenge'?'2026 第四季度\n#O1 合成目标\n#KR1 合成结果；基线未知，季度末核对证据':null});
+  const okrGuide=sampleGuide();
   const f=fixture(t,{config:{okr:{account:'iCloud',folder:'Notes'}},notesBridge,okrGuide});
   const send=async(id,text,parent)=>{f.messages.set(id,message(id,text,parent?{parent_id:parent}:{}));return f.capture.handle({...context(id,text),...(parent?{ReplyToId:parent}:{})});};
   await send('om_start','小婕 GTD okr 讨论');
-  for(let i=1;i<=4;i++)await send('om_r'+i,'合成回答'+i,f.sent.at(-1).message_id);
+  for(let i=1;i<=7;i++)await send('om_r'+i,'合成回答'+i,f.sent.at(-1).message_id);
   const ready=f.sent.at(-1).message_id;
   assert.equal((await send('om_self','确认定稿','om_r4')).status,'okr_needs_confirmation');
   assert.equal((await send('om_bare','小婕 GTD okr 确认定稿')).status,'okr_needs_confirmation');
