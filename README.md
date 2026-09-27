@@ -218,3 +218,11 @@ npm run verify:notes -- --write-synthetic --account iCloud --folder Notes
 ```
 
 第二条命令访问真实 Apple 备忘录，须有目标位置授权。复用 `runtime/notes/probe.sqlite`，不要换目录重试。权限、预算、恢复及 iCloud 并发限制见 [F101 接入说明](docs/deployment/notes.md)。
+
+## F102：提醒事项原生标签预检
+
+```bash
+npm run probe:tags
+```
+
+仅清点本机 SDK、系统脚本字典与快捷指令 CLI，不读取私人任务或写入标签。现有 EventKit/JXA 没有公开标签字段；快捷指令有官方标签支持，真实闭环待配置与验收。详见 [F102 调查与验证入口](docs/deployment/reminder-tags.md)。
