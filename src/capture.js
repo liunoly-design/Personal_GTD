@@ -1,3 +1,4 @@
+import { activationLength } from './activation.js';
 import { resolveReminder, validInstant, validTimeZone } from './reminder-time.js';
 
 export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString(), checkpoint = {} }) {
@@ -139,8 +140,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
   }
 
   function activated(event) {
-    return event.text.startsWith(activation)
-      && (event.text.length === activation.length || /^[\s，,:：]/u.test(event.text.slice(activation.length)));
+    return activationLength(event.text, activation) > 0;
   }
   function canHandle(event) {
     if (activated(event)) return true;
@@ -196,7 +196,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
         }
         return { status: 'not_handled', receipt: null };
       }
-      const remainder = event.text.slice(activation.length);
+      const remainder = event.text.slice(activationLength(event.text, activation));
       if (remainder && !/^[\s，,:：]/u.test(remainder)) return { status: 'not_handled', receipt: null };
       const instruction = remainder.replace(/^[\s，,:：]+/u, '');
       const reminder = instruction.match(/^(?:请)?(?:帮我)?提醒我([\s\S]+)$/u);

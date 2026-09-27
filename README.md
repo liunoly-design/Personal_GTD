@@ -74,7 +74,7 @@ node src/cli.js --config runtime/config.json
 
 | 配置 | 默认值 | 含义 |
 | --- | --- | --- |
-| `activation` | `小婕 GTD` | 新消息开头的完整激活词，其后需空格、逗号或冒号 |
+| `activation` | `小婕 GTD` | 开头激活词忽略英文大小写；词间空格可省略或重复，允许前导空白；其后需空格、逗号或冒号 |
 | `timeZone` | `Asia/Shanghai` | 未显式指定时采用的时区；非法配置直接拒绝启动 |
 | `allowedSenderIds` | `["demo-user"]` | 允许的合成发送者 ID |
 | `allowedConversationIds` | `["demo-chat"]` | 允许的合成会话 ID |

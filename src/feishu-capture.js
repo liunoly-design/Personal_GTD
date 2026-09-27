@@ -1,3 +1,4 @@
+import { activationLength } from './activation.js';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { openOperationStore } from './operation-store.js';
@@ -17,9 +18,7 @@ export function validateFeishuScope(config) {
     || config.activation !== config.activation.trim())) throw new Error('Invalid activation');
 }
 function activated(text, config) {
-  const activation = config.activation ?? '小婕 GTD';
-  return typeof text === 'string' && text.startsWith(activation)
-    && (text.length === activation.length || /^[\s，,:：]/u.test(text.slice(activation.length)));
+  return activationLength(text, config.activation) > 0;
 }
 // Only admits a candidate; the durable capture checks pending requests and
 // responds needs_target without guessing an item or calling the model.

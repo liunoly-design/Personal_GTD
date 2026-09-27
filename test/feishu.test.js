@@ -159,3 +159,23 @@ test('Apple 写入成功但响应丢失，显式恢复核对真实 ID 后补发�
   assert.equal((await f.reminders.listItems()).length,1);assert.equal(f.calls,1);
   assert.equal(f.sent.length,2);assert.match(f.sent[1].text,/已收集到 Inbox/);
 });
+
+test('激活词兼容大小写和空格，保留正文且不扩大触发或授权范围', async t => {
+  const f = fixture(t);
+  const prefixes = ['小婕 gtd', '小婕GTD', '小婕  GtD', '  小婕\u3000gTd'];
+  for (const [index, prefix] of prefixes.entries()) {
+    const id = 'om_variant_' + index;
+    const text = prefix + '，收集：空格测试 ' + index;
+    f.messages.set(id, message(id, text));
+    const result = await f.capture.handle(context(id, text));
+    assert.equal(result.status, 'collected');
+    const item = await f.reminders.getItem(result.itemId);
+    assert.equal(item.title, '空格测试 ' + index);
+    assert.ok(item.notes.includes(text));
+  }
+  for (const text of ['讨论小婕 gtd，收集：误触发', '小婕 gtd扩展，收集：误触发']) {
+    assert.equal((await f.capture.handle(context('om_no', text))).status, 'not_handled');
+  }
+  assert.equal((await f.capture.handle({ ...context('om_denied', '小婕gtd，收集：越权'), SenderId: 'ou_other' })).status, 'not_handled');
+  assert.equal((await f.reminders.listItems()).length, 4);
+});
