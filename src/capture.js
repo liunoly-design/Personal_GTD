@@ -1,6 +1,6 @@
 import { resolveReminder, validInstant, validTimeZone } from './reminder-time.js';
 
-export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString() }) {
+export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString(), checkpoint = {} }) {
   config = {
     activation: '小婕 GTD', allowedSenderIds: ['demo-user'], allowedConversationIds: ['demo-chat'],
     maxInputChars: 8000, analysisTimeoutMs: 15000, timeZone: 'Asia/Shanghai', ...structuredClone(config),
@@ -16,8 +16,8 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
     if (!Array.isArray(config[name]) || config[name].some(x => typeof x !== 'string' || !x)) throw new Error(`Invalid ${name}`);
   }
   const activation = config.activation;
-  const pending = new Map();
-  const reminderRequests = new Map();
+  const pending = new Map(structuredClone(checkpoint.pending ?? []));
+  const reminderRequests = new Map(structuredClone(checkpoint.reminderRequests ?? []));
   const key = (event, id = event.id) => JSON.stringify([event.senderId, event.conversationId, id]);
 
   async function analyzeMessage(event, content, reminderRequest = false, previousReminder = null, clarification = false) {
@@ -98,12 +98,14 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
           ? '【模拟】已收集，分析未完成，未设置提醒；请关联原请求回复具体日期、时间和时区。'
           : '【模拟】已收集，未设置提醒；请关联原请求回复具体日期、时间和时区。' };
     }
-    if (Date.parse(resolved.remindAt) <= Date.parse(now())) {
-      return { ...base, status: 'collected_awaiting_time', timeIssue: 'past',
-        receipt: '【模拟】已收集，但指定时间已过去，未设置提醒；请关联原请求回复新的日期和时间。' };
-    }
     try {
-      await reminders.setReminder(record.itemId, resolved);
+      const past = Date.parse(resolved.remindAt) <= Date.parse(now());
+      const alreadyApplied = past && await reminders.reconcileReminder?.(record.itemId, resolved);
+      if (past && !alreadyApplied) {
+        return { ...base, status: 'collected_awaiting_time', timeIssue: 'past',
+          receipt: '【模拟】已收集，但指定时间已过去，未设置提醒；请关联原请求回复新的日期和时间。' };
+      }
+      if (!alreadyApplied) await reminders.setReminder(record.itemId, resolved);
       return { ...base, status: 'reminder_set', ...resolved,
         receipt: `【模拟】已收集，提醒已设置：${resolved.localTime} ${resolved.timeZone}。` };
     } catch (error) {
@@ -121,28 +123,59 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
     return record.result;
   }
 
+  function validate(event) {
+    if (!event || ['id', 'senderId', 'conversationId', 'type', 'sentAt'].some(field => typeof event[field] !== 'string' || !event[field])
+      || !validInstant(event.sentAt) || (event.type === 'text' && typeof event.text !== 'string')
+      || (event.replyTo !== undefined && (typeof event.replyTo !== 'string' || !event.replyTo))) {
+      return { status: 'invalid_event', receipt: '【模拟】消息元数据无效；未创建事项。' };
+    }
+    if (!config.allowedSenderIds.includes(event.senderId) || !config.allowedConversationIds.includes(event.conversationId)) {
+      return { status: 'forbidden', receipt: null };
+    }
+    if (event.type !== 'text') return { status: 'unsupported', receipt: '【模拟】目前只支持文字和文字中的链接；未创建事项。' };
+    if ([...event.text].length > config.maxInputChars) {
+      return { status: 'input_too_large', receipt: '【模拟】内容超过本地收集容量，请拆分后再收集；未保存或截断原文。' };
+    }
+  }
+
+  function activated(event) {
+    return event.text.startsWith(activation)
+      && (event.text.length === activation.length || /^[\s，,:：]/u.test(event.text.slice(activation.length)));
+  }
+  function canHandle(event) {
+    if (activated(event)) return true;
+    if (event.replyTo && (pending.has(key(event, event.replyTo)) || reminderRequests.has(key(event, event.replyTo)))) return true;
+    return /^(?:\d{1,4}[:\-]|今天|明天|后天|下午|上午|北京时间|\[)/u.test(event.text.trim())
+      && [...reminderRequests.values()].some(record => record.event.senderId === event.senderId
+        && record.event.conversationId === event.conversationId && record.result?.status === 'collected_awaiting_time');
+  }
+
   return {
+    validate,
+    canHandle,
+    async checkpoint() {
+      const links = [];
+      for (const [id, entry] of pending) {
+        links.push([id, { ...entry, ...(entry.result ? { result: await entry.result } : {}) }]);
+      }
+      const times = [];
+      for (const [id, entry] of reminderRequests) {
+        await entry.queue;
+        const { queue, ...record } = entry;
+        times.push([id, record]);
+      }
+      return structuredClone({ pending: links, reminderRequests: times });
+    },
     async handle(event) {
-      if (!event || ['id', 'senderId', 'conversationId', 'type', 'sentAt'].some(field => typeof event[field] !== 'string' || !event[field])
-        || !validInstant(event.sentAt) || (event.type === 'text' && typeof event.text !== 'string')
-        || (event.replyTo !== undefined && (typeof event.replyTo !== 'string' || !event.replyTo))) {
-        return { status: 'invalid_event', receipt: '【模拟】消息元数据无效；未创建事项。' };
-      }
-      if (!config.allowedSenderIds.includes(event.senderId) || !config.allowedConversationIds.includes(event.conversationId)) {
-        return { status: 'forbidden', receipt: null };
-      }
-      if (event.type !== 'text') return { status: 'unsupported', receipt: '【模拟】目前只支持文字和文字中的链接；未创建事项。' };
-      if ([...event.text].length > config.maxInputChars) {
-        return { status: 'input_too_large', receipt: '【模拟】内容超过本地收集容量，请拆分后再收集；未保存或截断原文。' };
-      }
-      const activated = event.text.startsWith(activation)
-        && (event.text.length === activation.length || /^[\s，,:：]/u.test(event.text.slice(activation.length)));
-      const timeRequest = !activated && event.replyTo && reminderRequests.get(key(event, event.replyTo));
+      const rejected = validate(event);
+      if (rejected) return rejected;
+      const isActivated = activated(event);
+      const timeRequest = !isActivated && event.replyTo && reminderRequests.get(key(event, event.replyTo));
       if (timeRequest) {
         timeRequest.queue = (timeRequest.queue ?? Promise.resolve()).then(() => clarifyTime(timeRequest, event));
         return timeRequest.queue;
       }
-      const waiting = !activated && event.replyTo && pending.get(key(event, event.replyTo));
+      const waiting = !isActivated && event.replyTo && pending.get(key(event, event.replyTo));
       if (waiting) {
         if (waiting.result) return waiting.result;
         if (/^(?:确认|是|是的|收集|好的)[。！!]?$/u.test(event.text.trim())) {
@@ -155,7 +188,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
         }
         return { status: 'awaiting_confirmation', receipt: '【模拟】请回复“确认”或“取消”；未创建事项。' };
       }
-      if (!activated) {
+      if (!isActivated) {
         const ownPending = [...reminderRequests.values()].some(record => record.event.senderId === event.senderId
           && record.event.conversationId === event.conversationId && record.result?.status === 'collected_awaiting_time');
         if (ownPending && /^(?:\d{1,4}[:\-]|今天|明天|后天|下午|上午|北京时间|\[)/u.test(event.text.trim())) {

@@ -12,8 +12,11 @@ runtime/
 logs/
 *.log
 *.sqlite
+*.sqlite-*
 *.sqlite3
+*.sqlite3-*
 *.db
+*.db-*
 # Build and dependency artifacts
 node_modules/
 dist/
