@@ -1,6 +1,6 @@
 # 个人 GTD / Personal GTD
 
-独立项目，任务 01–05 已实现：本地收集、提醒、重启恢复、真实 Apple 接入及 Gemini 分析。飞书自动接入与 OpenClaw 运行插件尚待任务 06。
+独立项目，任务 01–06 的业务代码与安装交付已完成：本地收集、提醒、恢复、真实 Apple/Gemini 适配及 OpenClaw 飞书插件。06 的真实网关安装和飞书闭环验收由管理 OpenClaw 的 agent 接续。
 
 - [需求文档](需求文档.md)：范围、已确认需求与验收目标。
 - [架构与数据](架构与数据.md)：领域边界、Apple 工具和关联字段。
@@ -18,7 +18,7 @@
 - [任务管理](docs/agents/issue-tracker.md)：本地 Markdown 规格与任务，随 Git 同步。
 - [业务术语](CONTEXT.md)、[本次用户原始要求](docs/agents/用户原始要求.md)。
 
-开发任务见 [任务列表](.scratch/feishu-capture/ticket-plan.md)，已实现 01–05；最新验收见 [05：真实模型分析](.scratch/feishu-capture/issues/05-model-integration.md)。
+开发任务见 [任务列表](.scratch/feishu-capture/ticket-plan.md)，已实现 01–06 的开发交付；最新证据见 [06：插件交付](.scratch/feishu-capture/issues/06-feishu-integration.md)。首版整体验收仍待真实飞书联调。
 
 现有文档中指向 `../Personal-Agent-System-Design/` 的链接属于总体工作区历史资料，不包含在本独立仓库内；日常开发以本仓库当前需求及协议快照为准。需要追溯时在 Personal OS 工作区阅读原件。
 
@@ -150,7 +150,8 @@ npm run start:durable -- --state-dir runtime/demo --config examples/config.json 
 
 - [Apple 安装与验收](docs/integration/apple.md)：真实 Inbox、8000 字原文、提醒和手动移入 Wiki。
 - [Gemini 运行与质量评估](docs/integration/model.md)：复用 gtd 凭据、结构化分析、预算及真实错误样例。
-- [已有 OpenClaw agent 如何安装整体](docs/integration/openclaw.md)：运行程序、私有配置和接入插件各自的职责。
+- [已有 OpenClaw agent 如何安装整体](docs/integration/openclaw.md)：运行路径、插件与验证命令。
+- [给 OpenClaw 管理 agent 的交接](docs/integration/openclaw-handoff.md)：安装命令、配置模板、逐项验收、恢复和回滚。
 
 `npm run start:model -- --config examples/model-config.json --state-dir runtime/model-demo` 调用真实 Gemini，Apple 为模拟。加 `--apple` 并提供真实账户配置才写入 Apple；不要把演示身份字段用于飞书鉴权。
 
@@ -160,5 +161,16 @@ npm run start:durable -- --state-dir runtime/demo --config examples/config.json 
 - Apple 原文、提醒及设备通知已实测；缺失 Inbox 新建分支未在本机触发，真实 iCloud 冲突未注入。
 - 仅处理文字和文字内链接，不读取全文、不写 Wiki；链接由用户手动移动。
 - 当前模型适配器支持已核价的 Gemini Flash 型号；其他供应商需要适配，不能仅更改模型名称。
-- 本地 JSONL 中的身份来自操作者输入，不能代替飞书可信事件。现有 OpenClaw agent 尚未接入 PGTD 业务工具。
-- 下一项是 [06：飞书真实入口与回执](.scratch/feishu-capture/issues/06-feishu-integration.md)，完成后才能从飞书直接使用本仓库的收集流程。
+- 飞书插件已通过本机 OpenClaw 2026.9.6 的隔离加载，尚未安装到运行网关；本地 JSONL 身份不能代替飞书可信事件。
+- 下一步由管理 OpenClaw 的 agent 按交接文档安装并做真实飞书验收；当前不宣称飞书生产链路已可用。
+
+## OpenClaw 插件离线验收（任务 06）
+
+```bash
+npm run demo:feishu
+npm run plugin:validate
+mkdir -p dist
+npm pack --pack-destination dist
+```
+
+前两个命令不会调用真实 Apple、模型或飞书。插件包入口为 `openclaw/index.js`，不会包含 runtime、凭据或操作数据库。本机推荐由管理 agent 链接安装当前仓库并复用已有 helper；复制安装需在目标路径重新编译 helper。不要仅复制开发技能作为运行插件。

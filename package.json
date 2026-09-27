@@ -7,7 +7,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/capture.js && node --check src/simulation.js && node --check src/reminder-time.js && node --check src/cli.js && node --check src/operation-store.js && node --check src/durable-capture.js && node --check src/persistent-simulation.js && node --check src/durable-cli.js && node --check src/apple-reminders.js && node --check src/apple-cli.js && node --check src/gemini.js && node --check src/openclaw-auth.js && node --check src/model-cli.js && node --check scripts/openclaw-check.js",
+    "check": "node --check src/capture.js && node --check src/simulation.js && node --check src/reminder-time.js && node --check src/cli.js && node --check src/operation-store.js && node --check src/durable-capture.js && node --check src/persistent-simulation.js && node --check src/durable-cli.js && node --check src/apple-reminders.js && node --check src/apple-cli.js && node --check src/gemini.js && node --check src/openclaw-auth.js && node --check src/model-cli.js && node --check scripts/openclaw-check.js && node --check src/feishu-capture.js && node --check src/feishu-http.js && node --check openclaw/index.js && node --check openclaw/runtime.js && node --check scripts/recover-openclaw.js",
     "demo": "node src/cli.js --config examples/config.json < examples/messages.jsonl",
     "demo:reminders": "node examples/reminders.js",
     "start": "node src/cli.js",
@@ -16,9 +16,33 @@
     "build:apple": "sh scripts/build-apple.sh",
     "start:apple": "node src/apple-cli.js",
     "start:model": "node src/model-cli.js",
-    "openclaw:check": "node scripts/openclaw-check.js"
+    "openclaw:check": "node scripts/openclaw-check.js",
+    "demo:feishu": "node examples/feishu.js",
+    "recover:feishu": "node scripts/recover-openclaw.js",
+    "plugin:validate": "node scripts/check-plugin.js"
   },
   "dependencies": {
     "@js-temporal/polyfill": "0.5.1"
-  }
+  },
+  "version": "0.1.0",
+  "openclaw": {
+    "extensions": [
+      "./openclaw/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.9.6",
+      "minGatewayVersion": "2026.9.6"
+    }
+  },
+  "files": [
+    "openclaw/",
+    "openclaw.plugin.json",
+    "src/",
+    "native/",
+    "scripts/",
+    "examples/",
+    "docs/integration/",
+    "test/",
+    "npm-shrinkwrap.json"
+  ]
 }

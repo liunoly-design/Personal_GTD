@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "accountId": "default",
+  "entryAgentId": "xiaojie",
+  "allowedSenderIds": [
+    "ou_REPLACE_ME"
+  ],
+  "allowedConversationIds": [
+    "oc_REPLACE_ME"
+  ],
+  "activation": "小婕 GTD",
+  "stateDir": "/ABSOLUTE/PRIVATE/pgtd-feishu",
+  "runtimeConfigPath": "/ABSOLUTE/PRIVATE/pgtd-feishu-runtime.json"
+}

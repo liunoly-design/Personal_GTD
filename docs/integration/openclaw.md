@@ -1,49 +1,55 @@
-# 已有 OpenClaw agent，如何安装 PGTD
+# 在已有 OpenClaw 中安装 PGTD
 
-## 当前可以使用的部分
+任务 06 已提供插件入口 `openclaw/index.js`、根目录 `openclaw.plugin.json`、配置模板和恢复入口。安装方无需重写收集业务，也无需新建 agent。**本仓库完成的是接入代码与离线验收；运行中的网关尚未安装，真实飞书闭环尚未验收。**
 
-03 的恢复引擎、04 的 Apple 接入、05 的 Gemini 分析都已实现。现有 `gtd` agent 可以保留；本项目会复用它的 Google 凭据。本机 Apple helper 已编译、授权并绑定默认账户 Inbox，无须重新创建 agent。
+交给管理 OpenClaw 的 agent 时，请先读 [安装与调试交接](openclaw-handoff.md)。当前本机已具备 Node 24.21.0、OpenClaw 2026.9.6、飞书插件 2026.9.6，以及已验证的 Apple helper 和默认账户 Inbox 绑定。
 
-在项目目录检查：
-
-```bash
-npm run openclaw:check -- --agent gtd
-```
-
-当前会显示 Apple 已准备好、`entryInstalled: false`。这是准确状态：**尚未把飞书消息自动接入这条业务链**。现有 agent 的聊天模型配置不等于 PGTD 已安装。
-
-现在可从终端运行整条本机路径：
-
-```bash
-npm run start:model -- --config runtime/model/apple-config.json --state-dir runtime/apple --apple
-```
-
-它接收规范化 JSONL，调用真实模型、写入真实 Apple，返回状态和对象 ID；受已批准的共享测试预算限制。详细输入见 README。它不是飞书机器人启动命令。
-
-## 整体安装包含什么
-
-1. **业务程序**：本仓库 Node 代码、依赖、macOS EventKit helper。新的 Mac 需要 `npm ci --ignore-scripts`、`npm run build:apple` 和 Apple 系统授权。
-2. **私有配置与操作日志**：账户/列表 ID、允许的用户和会话、模型预算、恢复目录。放在运行目录，不能复制另一台机器的 Apple ID 或私人日志当作通用配置。
-3. **OpenClaw 接入插件（任务 06）**：把可信飞书事件交给业务入口，并把真实结果回传；注册受限业务能力，按 agent 范围启用。
-4. **agent 使用说明与权限**：沿用 `gtd` 角色，提供工具使用规则；由“小婕”接收消息。无需给 agent 开放任意 shell 或全部 Apple 操作。
-
-开发用 `.agents/skills` 是帮助写代码的规范，不能直接当成运行安装包。仅复制 SKILL.md 或向 agent 说“你能写 Apple”不会获得业务工具、去重或系统权限。
-
-## 任务 06 需要完成的接线
+## 运行路径
 
 ```mermaid
 flowchart LR
-  F[飞书真实消息] --> O[OpenClaw 小婕入口]
-  O --> A[可信事件接入：任务 06]
-  A --> G[PGTD：激活、权限、去重、模型分析]
-  G --> E[EventKit helper]
-  E --> R[Apple Inbox]
-  G --> B[真实执行结果]
-  B --> O
+  F[飞书消息] --> O[OpenClaw 小婕入口]
+  O --> P[PGTD reply_dispatch hook]
+  P --> V[按消息 ID 核对飞书原消息]
+  V --> G[激活、白名单、持久化去重]
+  G --> M[有预算上限的 Gemini 分析]
+  G --> A[EventKit helper 写入 Inbox]
+  A --> R[飞书 API 返回结果回执]
 ```
 
-接入必须从 OpenClaw/飞书可信上下文取得消息 ID、发送者、会话、原文、时间和回复关联，不能由模型自行填写这些权限字段。子 agent 转交也须保留来源关联。发送失败后如何核对回执，也要根据飞书真实能力处理，不能套用模拟服务的幂等保证。
+- 指令在普通 agent 推理前处理。由代码使用飞书账户、入口 agent、发送者、会话白名单授权；模型不能填写来源身份或自行决定写入权限。
+- 从飞书 API 核对消息 ID、`open_id`、`chat_id`、原始类型、创建时间、原文和父消息。图片、音频、富文本 post、卡片等不转成可写入文本；已编辑或删除消息拒收。
+- 不读取文章 URL。文章链接只收集到 Inbox，之后由用户手动整理到 `Wiki`。
+- 通过真实回执消息 ID 关联后续回复，重启后仍能补充原事项的时间。也支持回复原始用户指令。
+- 持久化回执发送意图；已确认发送不重复发送。响应未知时停止自动重发，不能保证所有故障下都有可见回执。
+- 不给模型开放任意 shell、Apple 删除/完成/移动工具；现有 `gtd` agent 仅复用 Google 凭据。运行模型仍是 05 的 `gemini-flash-latest` 适配，其他提供商需要另加适配，不能只改模型名。
 
-当前安装的 OpenClaw 2026.9.6 支持插件工具和入站/回复 hooks，但需要验证现有飞书插件提供的实际事件字段。接入插件尚未生成，因此目前不存在一个可宣称“安装后马上能从飞书收集”的 PGTD 安装命令。任务 06 完成时再交付插件包、安装命令、按 `gtd` 启用的配置和飞书端验收；不替换现有 agent，不覆盖其他 agent 的权限或凭据。
+## 本地验证
 
-参考：[OpenClaw 插件构建](https://docs.openclaw.ai/plugins/building-plugins)、[插件工具](https://docs.openclaw.ai/plugins/tool-plugins)、[插件 hooks](https://docs.openclaw.ai/plugins/hooks)。本轮同时核对了本机安装版本的 SDK 类型；未擅自更改运行网关或发送飞书消息。
+```bash
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run demo:feishu
+npm run plugin:validate
+npm run openclaw:check -- --agent gtd
+```
+
+`demo:feishu` 使用模拟飞书、模型和 Apple；30 条合成事件外加一次重投，预期 20 条事项、30 条回执。输出本地模拟延迟，不代表真实链路性能。
+
+`plugin:validate` 使用临时 OpenClaw 配置运行 `plugins doctor` 和 `plugins inspect --runtime`，确认实际加载和 hook 注册；不安装进现有网关，不访问真实业务服务。2026.9.6 的 `plugins validate` 子命令专用于工具/feature authoring 元数据，不能直接验证本项目的 hook/service 插件。
+
+## 安装组成
+
+1. 本仓库代码、Node 依赖、在目标 Mac 编译的 EventKit helper。
+2. 私有配置：Apple source/list ID、飞书白名单、共享模型预算账本、持久化状态目录。
+3. OpenClaw 安装/启用 `personal-gtd` 插件；保留现有小婕、gtd、wiki 角色和其他配置。
+4. 从网关实际运行身份验证 Apple 权限、飞书查询/回复权限、Google 凭据和费用限制。
+
+开发技能 `.agents/skills` 不参与运行安装。具体安装、回滚和逐项真实验收见 [管理 agent 交接](openclaw-handoff.md)。
+
+## 接口依据和限制
+
+核对了本机 2026.9.6 的 hook 类型、`reply_dispatch` 调用位置、飞书 `buildContext` 字段及官方 Node SDK 1.73.3 的消息接口。只支持该版本验证过的接口组合；升级后重做加载和真实接入验收。
+
+官方资料：[OpenClaw message hooks](https://docs.openclaw.ai/plugins/hooks/messages)、[插件构建](https://docs.openclaw.ai/plugins/building-plugins)、[飞书获取消息](https://open.feishu.cn/document/server-docs/im-v1/message/get)、[飞书回复消息](https://open.feishu.cn/document/server-docs/im-v1/message/reply)。飞书网页正文使用客户端渲染，本轮具体字段同时依据本机官方 SDK 类型核对。

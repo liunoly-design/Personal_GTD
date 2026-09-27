@@ -1,0 +1,17 @@
+{
+  "sourceId": "REPLACE_WITH_APPLE_SOURCE_ID",
+  "listId": "REPLACE_WITH_APPLE_INBOX_ID",
+  "authAgent": "gtd",
+  "usagePath": "/ABSOLUTE/PRIVATE/shared-model-usage.sqlite",
+  "model": {
+    "model": "gemini-flash-latest",
+    "maxBudgetUsd": 0.1,
+    "maxCalls": 30,
+    "maxOutputTokens": 1024,
+    "timeoutMs": 15000
+  },
+  "timeZone": "Asia/Shanghai",
+  "maxStoredEvents": 1000,
+  "maxInputChars": 8000,
+  "analysisTimeoutMs": 15000
+}

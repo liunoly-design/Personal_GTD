@@ -10,4 +10,6 @@ if(!agent)throw new Error('Requested agent not configured');
 console.log(JSON.stringify({agentId,openclaw:execFileSync('openclaw',['--version'],{encoding:'utf8'}).trim(),
   model:agent.model??config.agents?.defaults?.model,appleBridgeBuilt:existsSync('runtime/bin/pgtd-reminders'),
   appleConfigured:existsSync('runtime/apple/config.json'),
-  entryInstalled:false,reason:'任务 06 的可信飞书事件入口和回执接入尚未实施；已有 agent 不等于已安装收集业务。'},null,2));
+  entryConfigured:config.plugins?.entries?.['personal-gtd']?.enabled===true,
+  captureEnabled:config.plugins?.entries?.['personal-gtd']?.config?.enabled===true,
+  liveIntegrationVerified:false,reason:'这里只检查本地配置；请用 plugins inspect --runtime 核对加载，并执行安装交接文档中的真实验收。'},null,2));
