@@ -15,6 +15,7 @@ export function callApple(input, { signal, timeoutMs = 15000 } = {}) {
     }
     child.on('error', () => finish(new Error('Apple bridge unavailable')));
     child.stdin.on('error', () => {});
+    child.stdout.setEncoding('utf8');
     child.stdout.on('data', data => {
       output += data.toString();
       if (output.length > 1_000_000) { child.kill(); finish(new Error('Apple response too large')); }

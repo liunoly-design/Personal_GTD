@@ -51,13 +51,13 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
     } finally {
       clearTimeout(timer);
     }
-    const metrics = { mode: 'simulation', calls: 1, latencyMs: performance.now() - started,
-      inputTokens: null, outputTokens: null, failureReason };
+    const metrics = { mode: analyze.mode ?? 'simulation', calls: 1, latencyMs: performance.now() - started,
+      inputTokens: null, outputTokens: null, ...analysis?.telemetry, failureReason };
     return { analysis, metrics };
   }
 
-  async function save(event, content, reminderRequest = false) {
-    const { analysis, metrics } = await analyzeMessage(event, content, reminderRequest);
+  async function save(event, content, reminderRequest = false, evaluated) {
+    const { analysis, metrics } = evaluated ?? await analyzeMessage(event, content, reminderRequest);
     try {
       const candidates = (await reminders.listLists()).filter(x => x.name === 'Inbox');
       if (candidates.length > 1) {
@@ -214,6 +214,14 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
       const match = instruction.match(/^(?:请)?(?:帮我)?(?:收集|记录|记下|保存)(?:一下)?[\s:：，,]+([\s\S]*)$/u);
       const content = match?.[1].replace(/^[\s:：，,]+/u, '').trim();
       if (!content) {
+        if (config.modelIntents && instruction.trim()) {
+          const evaluated = await analyzeMessage(event, instruction);
+          if (['collect', 'remind'].includes(evaluated.analysis?.intent)) {
+            return save(event, instruction, evaluated.analysis.intent === 'remind', evaluated);
+          }
+          return { status: 'needs_instruction', analysis: evaluated.metrics,
+            receipt: '【模拟】尚未收集；请明确是否要收集或提醒，以及具体内容。' };
+        }
         return { status: 'needs_instruction', receipt: '【模拟】请明确要收集的内容；未创建事项。' };
       }
       return save(event, content);

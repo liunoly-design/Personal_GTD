@@ -153,10 +153,12 @@ export function openDurableCapture({ journalPath, reminders, receipts, analyze, 
         throw new Error('Analysis unavailable');
       }
     };
+    cachedAnalysis.mode = analyze.mode;
     const capture = createCapture({ ...options, config: record.config, now, reminders: adapter,
       analyze: cachedAnalysis, checkpoint: store.get('checkpoint') });
     const result = await capture.handle(record.event);
-    if (result.analysis && analysisReused) result.analysis = { ...result.analysis, calls: 0, cacheReused: true };
+    if (result.analysis && analysisReused) result.analysis = { ...result.analysis, calls: 0, inputTokens: 0,
+      outputTokens: 0, estimatedCostUsd: 0, cacheReused: true };
     if (unfinished.has(result.status)) result.receipt = result.itemId
       ? '【模拟】已收集，提醒尚待恢复核对；进度已保存，不会重新创建事项。'
       : '【模拟】写入尚未确认成功，进度已保存；恢复时先核对外部状态。';

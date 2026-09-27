@@ -1,0 +1,15 @@
+{
+  "authAgent": "gtd",
+  "usagePath": "runtime/model/usage.sqlite",
+  "model": {
+    "model": "gemini-flash-latest",
+    "maxCalls": 30,
+    "maxBudgetUsd": 0.1,
+    "maxOutputTokens": 1024,
+    "timeoutMs": 15000
+  },
+  "activation": "小婕 GTD",
+  "timeZone": "Asia/Shanghai",
+  "allowedSenderIds": ["demo-user"],
+  "allowedConversationIds": ["demo-chat"]
+}

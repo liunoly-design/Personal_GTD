@@ -1,6 +1,6 @@
 # 个人 GTD / Personal GTD
 
-独立项目，已有任务 01–03 的本地模拟收集、提醒、澄清及重启恢复流程；真实飞书、Apple 与模型业务接入尚未实现。
+独立项目，任务 01–05 已实现：本地收集、提醒、重启恢复、真实 Apple 接入及 Gemini 分析。飞书自动接入与 OpenClaw 运行插件尚待任务 06。
 
 - [需求文档](需求文档.md)：范围、已确认需求与验收目标。
 - [架构与数据](架构与数据.md)：领域边界、Apple 工具和关联字段。
@@ -8,7 +8,7 @@
 - [待确认问题](待确认问题.md)：后续讨论入口。
 - [参考项目](参考项目.md)：历史资料包中的相关参考。
 
-总体讨论位于上级 Personal OS 项目；共享约定见 [跨项目协议快照](docs/context/跨项目协议快照.md)。本地演示不会访问 Apple、飞书、网页或模型服务。
+总体讨论位于上级 Personal OS 项目；共享约定见 [跨项目协议快照](docs/context/跨项目协议快照.md)。原 demo 命令保持模拟；start:apple / start:model 会使用对应真实服务。
 
 ## 开发准备（2026-09-27）
 
@@ -18,7 +18,7 @@
 - [任务管理](docs/agents/issue-tracker.md)：本地 Markdown 规格与任务，随 Git 同步。
 - [业务术语](CONTEXT.md)、[本次用户原始要求](docs/agents/用户原始要求.md)。
 
-开发任务见 [任务列表](.scratch/feishu-capture/ticket-plan.md)，已实现 01–03；最新验收见 [03：重复投递、部分成功与重启恢复](.scratch/feishu-capture/issues/03-recovery.md)。
+开发任务见 [任务列表](.scratch/feishu-capture/ticket-plan.md)，已实现 01–05；最新验收见 [05：真实模型分析](.scratch/feishu-capture/issues/05-model-integration.md)。
 
 现有文档中指向 `../Personal-Agent-System-Design/` 的链接属于总体工作区历史资料，不包含在本独立仓库内；日常开发以本仓库当前需求及协议快照为准。需要追溯时在 Personal OS 工作区阅读原件。
 
@@ -146,10 +146,19 @@ npm run start:durable -- --state-dir runtime/demo --config examples/config.json 
 
 每事件最多一次分析调用，不自动重试；中断或超时后按分析失败降级。调用量、延迟、失败原因留在操作记录中；恢复复用分析时本次调用量为 0。token 和费用尚未测量；输出字符上限不能代替真实模型 token 上限。外部适配器接收 AbortSignal，但必须额外保证同一操作 ID 的幂等写入；超时本身不能证明没有写入。当前模拟服务用事务同时保存对象和操作标记；真实 Apple/飞书是否能满足这些条件须在任务 04/06 验证，不能直接套用模拟保证。
 
+## 真实接入与 OpenClaw 使用
+
+- [Apple 安装与验收](docs/integration/apple.md)：真实 Inbox、8000 字原文、提醒和手动移入 Wiki。
+- [Gemini 运行与质量评估](docs/integration/model.md)：复用 gtd 凭据、结构化分析、预算及真实错误样例。
+- [已有 OpenClaw agent 如何安装整体](docs/integration/openclaw.md)：运行程序、私有配置和接入插件各自的职责。
+
+`npm run start:model -- --config examples/model-config.json --state-dir runtime/model-demo` 调用真实 Gemini，Apple 为模拟。加 `--apple` 并提供真实账户配置才写入 Apple；不要把演示身份字段用于飞书鉴权。
+
 ## 当前限制与下一步
 
-- 这是收集路径的模拟演示。建议由固定模拟分析器生成，不代表模型理解了内容。
-- 提醒字段和澄清已在模拟边界实现；没有真实设备通知。持久化、一般事件去重与重启恢复已在模拟边界验证，本版不能用于正式任务存储。
-- 只有文本和文本内链接受支持；链接不会被访问。图片、语音、附件和转发卡片均不处理。
-- 不调用 Apple、不发飞书消息、不连接模型、不移动条目、不写 Wiki。持久化模式可显式执行核对与恢复；真实外部核对仍待验证。
-- 下一项是 [04：真实 Apple 收集和提醒](.scratch/feishu-capture/issues/04-apple-integration.md)。
+- 模拟命令继续使用固定分析规则；真实模型命令单独计费与验收。
+- Apple 原文、提醒及设备通知已实测；缺失 Inbox 新建分支未在本机触发，真实 iCloud 冲突未注入。
+- 仅处理文字和文字内链接，不读取全文、不写 Wiki；链接由用户手动移动。
+- 当前模型适配器支持已核价的 Gemini Flash 型号；其他供应商需要适配，不能仅更改模型名称。
+- 本地 JSONL 中的身份来自操作者输入，不能代替飞书可信事件。现有 OpenClaw agent 尚未接入 PGTD 业务工具。
+- 下一项是 [06：飞书真实入口与回执](.scratch/feishu-capture/issues/06-feishu-integration.md)，完成后才能从飞书直接使用本仓库的收集流程。
