@@ -30,7 +30,8 @@ function run() {
     if (input.command === 'create') {
       var probeTitle = /^PGTD F101 合成测试 PGTD-F101-[a-f0-9-]{36}$/.test(input.title);
       var okrTitle = input.title === 'PGTD OKR 日志' && /PGTD-OKR-[a-f0-9-]{36}/.test(input.body);
-      if ((!probeTitle && !okrTitle) || typeof input.body !== 'string' || input.body.length > 32768) fail('INVALID_INPUT');
+      var finalTitle = input.title === 'PGTD OKR 最新稿' && /PGTD-FINAL-[a-f0-9-]{36}/.test(input.body);
+      if ((!probeTitle && !okrTitle && !finalTitle) || typeof input.body !== 'string' || input.body.length > 32768) fail('INVALID_INPUT');
       var note = app.Note({ body: input.body });
       folder.notes.push(note);
       value = snapshot(note);
@@ -38,13 +39,20 @@ function run() {
       var candidates = folder.notes.whose({ name: input.title })();
       if (candidates.length > 10) fail('CAPACITY_EXCEEDED');
       value = candidates.map(snapshot).filter(function(n) { return n.plaintext.indexOf(input.marker) >= 0; });
-    } else if (input.command === 'read' || input.command === 'append') {
+    } else if (input.command === 'read' || input.command === 'append' || input.command === 'replace') {
       var note = unique(folder.notes.whose({ id: input.noteId })());
       var before = snapshot(note);
       if (input.command === 'append') {
         if (before.body !== input.expectedBody) fail('CONFLICT');
         if ((before.body + input.addition).length > 32768) fail('CAPACITY_EXCEEDED');
         note.body = before.body + input.addition;
+      }
+      if (input.command === 'replace') {
+        if (before.body !== input.expectedBody) fail('CONFLICT');
+        if (typeof input.body !== 'string' || input.body.length > 32768
+          || input.body.indexOf('<div>PGTD OKR 最新稿</div>') !== 0
+          || !/PGTD-FINAL-[a-f0-9-]{36}/.test(input.body)) fail('INVALID_INPUT');
+        note.body = input.body;
       }
       value = snapshot(note);
     } else fail('INVALID_INPUT');

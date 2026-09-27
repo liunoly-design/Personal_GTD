@@ -1,3 +1,4 @@
+import { okrInstructions, okrSchema, validateGuidance } from './okr-guidance.js';
 import { randomUUID } from 'node:crypto';
 import { openOperationStore } from './operation-store.js';
 
@@ -19,11 +20,11 @@ const prices = [
 
 export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, config = {} }) {
   config = { model:'gemini-flash-latest', maxCalls:30, maxBudgetUsd:0.1, maxOutputTokens:1024,
-    maxInputBytes:30000, timeoutMs:15000, maxResponseBytes:65536, ...config };
+    maxOkrOutputTokens:4096, maxInputBytes:30000, timeoutMs:15000, maxResponseBytes:65536, ...config };
   if (config.model !== 'gemini-flash-latest' && !prices.some(([name]) => name === config.model)) {
     throw new Error('Model requires a verified price and adapter compatibility');
   }
-  for (const key of ['maxCalls','maxOutputTokens','maxInputBytes','timeoutMs','maxResponseBytes']) {
+  for (const key of ['maxCalls','maxOutputTokens','maxOkrOutputTokens','maxInputBytes','timeoutMs','maxResponseBytes']) {
     if (!Number.isSafeInteger(config[key]) || config[key] < 1) throw new Error('Invalid model budget');
   }
   if (!(config.maxBudgetUsd > 0 && Number.isFinite(config.maxBudgetUsd))) throw new Error('Invalid monetary budget');
@@ -39,13 +40,15 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
       unsettledCalls:rows.filter(r=>r.estimatedCostUsd==null).length,
       records:rows };
   }
-  async function analyze(args) {
+  async function analyze(args, task = 'capture') {
     const {signal, ...input} = args;
     signal?.throwIfAborted();
-    const body = JSON.stringify({ systemInstruction:{parts:[{text:instructions}]}, contents:[{role:'user',parts:[{text:JSON.stringify(input)}]}],
-      generationConfig:{temperature:0,maxOutputTokens:config.maxOutputTokens,
+    const isOkr = task === 'okr';
+    const maxOutputTokens = isOkr ? config.maxOkrOutputTokens : config.maxOutputTokens;
+    const body = JSON.stringify({ systemInstruction:{parts:[{text:isOkr ? okrInstructions : instructions}]}, contents:[{role:'user',parts:[{text:JSON.stringify(input)}]}],
+      generationConfig:{temperature:0,maxOutputTokens,
         thinkingConfig:config.model.startsWith('gemini-2.5-')?{thinkingBudget:0}:{thinkingLevel:'low'},
-        responseMimeType:'application/json',responseJsonSchema:schema} });
+        responseMimeType:'application/json',responseJsonSchema:isOkr ? okrSchema : schema} });
     const bytes = Buffer.byteLength(body);
     if (bytes > config.maxInputBytes) throw new Error('Model input capacity exceeded');
     const requestSignal = AbortSignal.any([AbortSignal.timeout(config.timeoutMs), ...(signal ? [signal] : [])]);
@@ -59,10 +62,10 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
     requestSignal.throwIfAborted();
     if (!key) throw new Error('Model credential unavailable');
     // Conservative text-only reservation above documented Flash Standard rates; never treat unknown usage as zero.
-    const reservation = ((bytes + 512) * 3 + config.maxOutputTokens * 15) / 1e6;
+    const reservation = ((bytes + 512) * 3 + maxOutputTokens * 15) / 1e6;
     const id = 'call:' + randomUUID();
     const started = performance.now();
-    let record = { model:config.model, state:'started', budgetUsd:reservation, estimatedCostUsd:null, inputTokens:null, outputTokens:null,
+    let record = { purpose:task, model:config.model, state:'started', budgetUsd:reservation, estimatedCostUsd:null, inputTokens:null, outputTokens:null,
       latencyMs:null, failureReason:'interrupted_or_in_progress' };
     store.transaction(() => {
       const current=usage();
@@ -98,25 +101,28 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
       if(candidate?.finishReason!=='STOP') { reason='incomplete_output'; throw new Error('Incomplete model response'); }
       const text=candidate.content?.parts?.filter(part=>!part.thought).map(part=>part.text??'').join('');
       const value=JSON.parse(text);
-      if (/^\d{2}:\d{2}:00$/u.test(value.reminder?.time ?? '')) value.reminder.time=value.reminder.time.slice(0,5);
-      if (!['collect','remind','discuss','uncertain'].includes(value.intent) || typeof value.title!=='string' || !value.title.trim()
+      let guidance;
+      if (isOkr) guidance = validateGuidance(value);
+      if (!isOkr && /^\d{2}:\d{2}:00$/u.test(value.reminder?.time ?? '')) value.reminder.time=value.reminder.time.slice(0,5);
+      if (!isOkr && (!['collect','remind','discuss','uncertain'].includes(value.intent) || typeof value.title!=='string' || !value.title.trim()
         || [...value.title].length>80 || /[\r\n]/u.test(value.title) || typeof value.suggestion!=='string'
         || [...value.suggestion].length>120 || !/^[^\r\n。！？!?.]+[。！？!?.]?$/u.test(value.suggestion)
-        || /已.{0,12}(?:收集|保存|归入|归档|创建|设置|完成|删除|发送|执行)/u.test(value.suggestion)) throw new Error('Invalid model fields');
+        || /已.{0,12}(?:收集|保存|归入|归档|创建|设置|完成|删除|发送|执行)/u.test(value.suggestion))) throw new Error('Invalid model fields');
       record={...record,state:'done',latencyMs:performance.now()-started,failureReason:null};store.set(id,record);
-      return {intent:value.intent,title:value.title,suggestion:value.suggestion,reminder:value.reminder,
+      return { ...(isOkr ? guidance : {intent:value.intent,title:value.title,suggestion:value.suggestion,reminder:value.reminder}),
         telemetry:{mode:'model',provider:'google',model:payload.modelVersion,inputTokens:record.inputTokens,outputTokens,estimatedCostUsd:record.estimatedCostUsd}};
     } catch {
       store.set(id,{...record,state:'failed',latencyMs:performance.now()-started,failureReason:reason});
       throw new Error('Model analysis unavailable');
     }
   }
-  const analyzeQueued = Object.assign(function(args) {
+  const analyzeQueued = Object.assign(function(args, purpose = 'capture') {
       if(closed)throw new Error('Model closed');
-      const task=queue.then(()=>analyze(args));queue=task.catch(()=>{});return task;
+      const task=queue.then(()=>analyze(args, purpose));queue=task.catch(()=>{});return task;
     }, { mode: 'model' });
   return {
     analyze: analyzeQueued,
+    discussOkr: args => analyzeQueued(args, 'okr'),
     usage,
     async close(){closed=true;await queue;store.close();},
   };

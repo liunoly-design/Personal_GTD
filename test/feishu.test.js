@@ -22,7 +22,7 @@ function fixture(t, options={}) {
     const result={message_id:'om_bot_'+(sent.length+1),chat_id:input.conversationId};sent.push({...input,...result});
     if(options.loseReply) throw new Error('response lost');return result;
   }};
-  const make=()=>openFeishuCapture({stateDir:dir,config:{...scope,...options.config},reminders,feishu,notesBridge:options.notesBridge,
+  const make=()=>openFeishuCapture({stateDir:dir,config:{...scope,...options.config},reminders,feishu,notesBridge:options.notesBridge,okrGuide:options.okrGuide,
     analyze:async args=>{calls++;return simulatedAnalysis(args);},now:()=> '2026-09-27T02:00:00Z'});
   let capture=make();
   t.after(async()=>{await capture.close();reminders.close();rmSync(dir,{recursive:true,force:true});});
@@ -194,9 +194,9 @@ test('飞书 OKR 关联回复跨重启保存标签原文，暂停后不写，不
   const notes=[];
   const notesBridge=async r=>{
     if(r.command==='bind') return {accountId:'a',folderId:'f'};
-    if(r.command==='create'){const n={id:'note1',body:r.body,plaintext:r.body};notes.push(n);return {...n};}
+    if(r.command==='create'){const n={id:'note1',body:r.body,plaintext:r.body.replaceAll('<br>','\n')};notes.push(n);return {...n};}
     const n=notes.find(n=>n.id===r.noteId);
-    if(r.command==='append'){assert.equal(n.body,r.expectedBody);n.body+=r.addition;n.plaintext=n.body;}
+    if(r.command==='append'){assert.equal(n.body,r.expectedBody);n.body+=r.addition;n.plaintext=n.body.replaceAll('<br>','\n');}
     return {...n};
   };
   const f=fixture(t,{config:{okr:{account:'iCloud',folder:'Notes'}},notesBridge});
@@ -233,4 +233,28 @@ test('OKR 失败和未知子命令不回落收集，伪造来源也不能触发 
   f.messages.set('om_unknown',message('om_unknown',unknown));
   assert.equal((await f.capture.handle(context('om_unknown',unknown))).status,'okr_help');
   assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,0);
+});
+
+test('飞书显式确认必须回复当前草案，定稿不会创建 Inbox 事项', async t => {
+  const notes=[];
+  const notesBridge=async r=>{
+    if(r.command==='bind')return {accountId:'a',folderId:'f'};
+    if(r.command==='create'){const n={id:'n'+(notes.length+1),body:r.body,plaintext:r.body.replaceAll('<br>','\n')};notes.push(n);return {...n};}
+    const n=notes.find(n=>n.id===r.noteId);
+    if(r.command==='append'){assert.equal(n.body,r.expectedBody);n.body+=r.addition;n.plaintext=n.body.replaceAll('<br>','\n');}
+    return {...n};
+  };
+  const okrGuide=async({stage})=>({stage:({background:'direction',direction:'okr',okr:'challenge',challenge:'ready'})[stage],
+    summary:'合成背景',advice:'比较替代方案和反对理由',questions:stage==='challenge'?[]:['是否接受？'],
+    draft:stage==='challenge'?'2026 第四季度\n#O1 合成目标\n#KR1 合成结果；基线未知，季度末核对证据':null});
+  const f=fixture(t,{config:{okr:{account:'iCloud',folder:'Notes'}},notesBridge,okrGuide});
+  const send=async(id,text,parent)=>{f.messages.set(id,message(id,text,parent?{parent_id:parent}:{}));return f.capture.handle({...context(id,text),...(parent?{ReplyToId:parent}:{})});};
+  await send('om_start','小婕 GTD okr 讨论');
+  for(let i=1;i<=4;i++)await send('om_r'+i,'合成回答'+i,f.sent.at(-1).message_id);
+  const ready=f.sent.at(-1).message_id;
+  assert.equal((await send('om_self','确认定稿','om_r4')).status,'okr_needs_confirmation');
+  assert.equal((await send('om_bare','小婕 GTD okr 确认定稿')).status,'okr_needs_confirmation');
+  const result=await send('om_confirm','确认定稿',ready);
+  assert.equal(result.status,'okr_finalized');assert.equal(notes.length,2);
+  assert.equal((await f.reminders.listItems()).length,0);assert.equal(f.calls,0);
 });

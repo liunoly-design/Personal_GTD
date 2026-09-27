@@ -34,7 +34,7 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
       apiKey });
     reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
-      reminders, feishu, analyze: model.analyze, notesBridge: callNotes });
+      reminders, feishu, analyze: model.analyze, notesBridge: callNotes, okrGuide: model.discussOkr });
     return { handle: (ctx, options) => capture.handle(ctx, options), recover: () => capture.recover(), async close() {
       await capture.close(); reminders.close(); await model.close();
     } };

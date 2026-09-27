@@ -8,7 +8,7 @@
 - [架构与数据](docs/requirements/架构与数据.md)：领域边界、Apple 工具和关联字段。
 - [工作流与Review](docs/requirements/工作流与Review.md)：日常行动与周期回顾。
 - [待确认问题](docs/requirements/待确认问题.md)：后续讨论入口。
-- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（F101/F102 接入验证和 F103 日志代码已完成，F103 尚未部署）。
+- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（F101/F102 接入验证和 F103/F104 日志与定稿代码已完成，尚未部署）。
 - [功能实现清单](docs/requirements/功能实现清单.md)：全部功能的稳定 F 编号、V0–V5 规划分组、状态与 skill 开发流程；可按编号讨论和开发。
 - [参考项目](docs/requirements/参考项目.md)：历史资料包中的相关参考。
 
@@ -210,7 +210,7 @@ npm pack --pack-destination dist
 
 ## F101：备忘录接入验证
 
-已在授权的 `iCloud / Notes` 创建、追加并读回同一篇合成笔记，验证新进程复用和过期快照拒绝。笔记保留供验收；正式 OKR 飞书入口仍未实现。
+已在授权的 `iCloud / Notes` 创建、追加并读回同一篇合成笔记，验证新进程复用和过期快照拒绝。笔记保留供验收；F103/F104 已实现 OKR 入口与定稿代码，尚未部署。
 
 ```bash
 npm run test:notes
@@ -239,3 +239,14 @@ npm run verify:okr -- --write-synthetic
 ```
 
 正式启用需要私有运行配置中的 `okr` 位置和正式文档授权，详见 [配置、用法与验证限制](docs/deployment/okr.md)。本轮没有部署或发送真实飞书消息。
+
+## F104：OKR 引导与确认定稿（尚未部署）
+
+在 F103 日志上逐轮讨论个人情况、年度/季度目标和策略，反向审视后展示完整草案。回复草案回执“确认定稿”才更新第二篇最新稿，旧版保留在日志中；#O1/#KR1 等标签随文本保存。
+
+```bash
+npm run test:okr
+npm run demo:okr-finalize
+```
+
+真实模型样例和既有合成日志验证已执行；新增第二篇合成笔记的真实验收等待授权。配置、可选真实验证命令、预算及未测项见 [F104 使用与验收](docs/deployment/okr-finalize.md)。仍未部署到正在使用的飞书网关。
