@@ -76,7 +76,13 @@ npx skills@1.7.0 list -a codex
 | `writing-fragments` | `in-progress` |
 | `writing-shape` | `in-progress` |
 
-## 参考
+## 本地业务讨论技能
+
+2026-09-27 新增 [personal-okr-discussion](../../.agents/skills/personal-okr-discussion/SKILL.md)，用于个人 OKR 背景访谈、逐轮建立、持续记录和策略反向审视。该技能为项目原创，不属于上述 38 项上游安装，也不修改上游锁文件；随本仓库维护。
+
+来源比较见 [个人 OKR 研究](../requirements/个人OKR管理研究.md)。创建时按 skill-creator 与 writing-for-agents 约定编写，复用本地 grilling 的讨论方法。生产飞书触发和持久化仍需业务代码接入；安装开发技能不代表部署运行能力。
+
+## 参考资料
 
 - [上游 README](https://github.com/mattpocock/skills)：安装及技能职责。
 - [skills CLI](https://github.com/vercel-labs/skills)：项目安装、目标 agent 和锁文件。
