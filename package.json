@@ -1,0 +1,12 @@
+{
+  "name": "personal-gtd",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/capture.js && node --check src/simulation.js && node --check src/cli.js",
+    "demo": "node src/cli.js --config examples/config.json < examples/messages.jsonl",
+    "start": "node src/cli.js"
+  }
+}

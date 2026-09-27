@@ -1,0 +1,7 @@
+{
+  "activation": "小婕 GTD",
+  "allowedSenderIds": ["demo-user"],
+  "allowedConversationIds": ["demo-chat"],
+  "maxInputChars": 8000,
+  "analysisTimeoutMs": 15000
+}
