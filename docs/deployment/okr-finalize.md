@@ -39,17 +39,17 @@ npm run demo:okr-finalize
 npm run evaluate:okr -- --allow-model
 # 只复用已授权的 F101 合成日志
 npm run verify:okr-finalize -- --write-synthetic --log-only
-# 需另获新增第二篇合成笔记授权；当前尚未执行
+# 已获本次新增合成最新稿授权；复用固定状态避免重复创建
 npm run verify:okr-finalize -- --write-synthetic
 ```
 
-模型评估可用 `--case ready` 选择一个样例，`--output` 指定私有报告。Apple 验证保留固定状态和合成笔记，重复运行不重复创建。完整双笔记验证会新增一篇仅含合成内容的 `PGTD OKR 最新稿`，再修订一次并读回；该授权问题已提出，尚未收到答复。
+模型评估可用 `--case ready` 选择一个样例，`--output` 指定私有报告。Apple 验证保留固定状态和合成笔记，重复运行不重复创建。完整双笔记验证会新增一篇仅含合成内容的 `PGTD OKR 最新稿`，再修订一次并读回；用户已明确回复“批准新增测试笔记”，本次范围已获授权，合成笔记保留供验收。
 
 ## 证据（2026-09-27）
 
 - 模拟：多轮保存、反向审视后确认、二次定稿保留历史、旧版/跨会话/无回执确认拒绝、重复及重启、未知创建/替换结果、模型超时和人工冲突通过。
 - 真实模型：3 个独立合成样例返回 direction/challenge/ready；发现擅自加入开源与固定检查日，修订提示词后针对 ready 再测一次，检查日变为待确认且不再要求开源。修正字面 `\\n` 的换行显示。共 2366 输入 token、1665 输出 token，账本按现有适配器费率估算 $0.00801825，单次 3.36–4.30 秒。仅四个样例，不代表完整多轮质量评估；草案仍需用户审核。
 - 真实 Notes：`--log-only` 成功，约 11.6 秒，保存四轮合成回答与固定引导，保留 F101 原文；0 次模型调用。真实模型与 Notes 分开验证，没有声称完成真实飞书端到端。
-- 双笔记真实创建/替换：待新增测试笔记授权，尚未执行；自动化测试通过不代替此验收。
+- 双笔记真实创建/替换：已获授权并运行通过，首次约 13037 ms；sameLatestNote、historyPreserved、tagsPreserved、duplicateSuppressed 均为 true，0 次模型调用。新增的合成最新稿与既有合成日志均保留；第二个独立进程再次验证通过，约1184ms；未重复创建笔记。这不代表已验证Notes应用重启或多设备同步。
 
 工程状态见 [F104 任务](../../.scratch/f104-okr-finalize/issues/01-guidance-finalize.md)。

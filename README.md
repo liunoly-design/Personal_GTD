@@ -249,4 +249,4 @@ npm run test:okr
 npm run demo:okr-finalize
 ```
 
-真实模型样例和既有合成日志验证已执行；新增第二篇合成笔记的真实验收等待授权。配置、可选真实验证命令、预算及未测项见 [F104 使用与验收](docs/deployment/okr-finalize.md)。仍未部署到正在使用的飞书网关。
+真实模型样例、合成日志和新增合成最新稿的创建、修订、读回验证均已执行。配置、可选真实验证命令、预算及未测项见 [F104 使用与验收](docs/deployment/okr-finalize.md)。仍未部署到正在使用的飞书网关。
