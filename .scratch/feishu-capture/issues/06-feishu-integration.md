@@ -24,7 +24,7 @@ Spec: [首版规格](../spec.md)
 
 ## 安装方继续验收
 
-详见 [管理 agent 交接](../../../docs/integration/openclaw-handoff.md)。
+详见 [管理 agent 交接](../../../docs/deployment/openclaw-handoff.md)。
 
 - [ ] 安装/启用到实际网关，核对授权用户与聊天 ID、已解析凭据及实际网关 Apple 权限。
 - [ ] 从真实飞书收集/设置提醒/回复澄清，实际定位 Apple 条目并核对回执和去重。

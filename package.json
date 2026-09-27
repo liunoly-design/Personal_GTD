@@ -7,19 +7,19 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/activation.js && node --check src/capture.js && node --check src/simulation.js && node --check src/reminder-time.js && node --check src/cli.js && node --check src/operation-store.js && node --check src/durable-capture.js && node --check src/persistent-simulation.js && node --check src/durable-cli.js && node --check src/apple-reminders.js && node --check src/apple-cli.js && node --check src/gemini.js && node --check src/openclaw-auth.js && node --check src/model-cli.js && node --check scripts/openclaw-check.js && node --check src/feishu-capture.js && node --check src/feishu-http.js && node --check openclaw/index.js && node --check openclaw/runtime.js && node --check scripts/recover-openclaw.js",
-    "demo": "node src/cli.js --config examples/config.json < examples/messages.jsonl",
+    "check": "node --check src/activation.js && node --check src/capture.js && node --check src/simulation.js && node --check src/reminder-time.js && node --check src/cli.js && node --check src/operation-store.js && node --check src/durable-capture.js && node --check src/persistent-simulation.js && node --check src/durable-cli.js && node --check src/apple-reminders.js && node --check src/apple-cli.js && node --check src/gemini.js && node --check src/openclaw-auth.js && node --check src/model-cli.js && node --check deploy/openclaw-check.js && node --check src/feishu-capture.js && node --check src/feishu-http.js && node --check openclaw/index.js && node --check openclaw/runtime.js && node --check deploy/recover-openclaw.js",
+    "demo": "node src/cli.js --config config/config.json < examples/messages.jsonl",
     "demo:reminders": "node examples/reminders.js",
     "start": "node src/cli.js",
     "demo:recovery": "node examples/recovery.js",
     "start:durable": "node src/durable-cli.js",
-    "build:apple": "sh scripts/build-apple.sh",
+    "build:apple": "sh deploy/build-apple.sh",
     "start:apple": "node src/apple-cli.js",
     "start:model": "node src/model-cli.js",
-    "openclaw:check": "node scripts/openclaw-check.js",
+    "openclaw:check": "node deploy/openclaw-check.js",
     "demo:feishu": "node examples/feishu.js",
-    "recover:feishu": "node scripts/recover-openclaw.js",
-    "plugin:validate": "node scripts/check-plugin.js"
+    "recover:feishu": "node deploy/recover-openclaw.js",
+    "plugin:validate": "node deploy/check-plugin.js"
   },
   "dependencies": {
     "@js-temporal/polyfill": "0.5.1"
@@ -39,9 +39,10 @@
     "openclaw.plugin.json",
     "src/",
     "native/",
-    "scripts/",
+    "deploy/",
     "examples/",
-    "docs/integration/",
+    "config/",
+    "docs/deployment/",
     "test/",
     "npm-shrinkwrap.json"
   ]

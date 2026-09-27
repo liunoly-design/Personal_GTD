@@ -1,14 +1,33 @@
 # 个人 GTD / Personal GTD
 
-独立项目，任务 01–06 的业务代码与安装交付已完成：本地收集、提醒、恢复、真实 Apple/Gemini 适配及 OpenClaw 飞书插件。06 的真实网关安装和飞书闭环验收由管理 OpenClaw 的 agent 接续。
+任务 01–06 的代码与安装交付已完成，插件已接入本机 OpenClaw 网关。基础收集和提醒已验证；用户反馈链接确认、时间澄清以及大小写兼容、默认收集均成功。完整故障恢复与容量验收仍有未测项，详见 [安装记录](docs/deployment/installation-2026-09-27.md)。
 
-- [需求文档](需求文档.md)：范围、已确认需求与验收目标。
-- [架构与数据](架构与数据.md)：领域边界、Apple 工具和关联字段。
-- [工作流与Review](工作流与Review.md)：日常行动与周期回顾。
-- [待确认问题](待确认问题.md)：后续讨论入口。
-- [参考项目](参考项目.md)：历史资料包中的相关参考。
+飞书由“小婕”统一接入；本仓库的 PGTD 插件接管激活请求并写入 Apple Inbox。独立 `gtd` / `wiki` Agent 的共享运行架构位于总体工作区 `OpenClaw/README.md`。
+
+- [需求文档](docs/requirements/需求文档.md)：范围、已确认需求与验收目标。
+- [架构与数据](docs/requirements/架构与数据.md)：领域边界、Apple 工具和关联字段。
+- [工作流与Review](docs/requirements/工作流与Review.md)：日常行动与周期回顾。
+- [待确认问题](docs/requirements/待确认问题.md)：后续讨论入口。
+- [参考项目](docs/requirements/参考项目.md)：历史资料包中的相关参考。
 
 总体讨论位于上级 Personal OS 项目；共享约定见 [跨项目协议快照](docs/context/跨项目协议快照.md)。原 demo 命令保持模拟；start:apple / start:model 会使用对应真实服务。
+
+## 目录导航
+
+| 目录 | 内容 |
+| --- | --- |
+| `docs/requirements/` | 需求、架构、工作流、待确认问题与参考资料 |
+| `docs/deployment/` | Apple、模型与 OpenClaw 安装说明、交接与验收记录 |
+| `docs/agents/`、`docs/context/` | 开发约定与跨项目协议快照 |
+| `src/` | 收集、提醒、持久化、适配器与 CLI 业务代码 |
+| `openclaw/`、`native/` | OpenClaw 插件入口与 Apple Swift 桥接源码 |
+| `deploy/` | 安装、编译、验证与恢复脚本 |
+| `config/` | 可提交的合成配置示例 |
+| `test/`、`examples/` | 自动化测试、模拟演示与合成输入 |
+| `.scratch/` | 版本规格、任务与验收记录 |
+| `runtime/` | 本机配置、凭据引用、数据库与 helper；Git 忽略 |
+
+根目录保留 README、AGENTS、CONTEXT、npm 清单/锁文件和 OpenClaw 插件清单，供工具直接发现。旧 `scripts/` 已迁入 `deploy/`，配置示例从 `examples/` 迁入 `config/`；npm 命令名称保持不变。
 
 ## 开发准备（2026-09-27）
 
@@ -18,7 +37,7 @@
 - [任务管理](docs/agents/issue-tracker.md)：本地 Markdown 规格与任务，随 Git 同步。
 - [业务术语](CONTEXT.md)、[本次用户原始要求](docs/agents/用户原始要求.md)。
 
-开发任务见 [任务列表](.scratch/feishu-capture/ticket-plan.md)，已实现 01–06 的开发交付；最新证据见 [06：插件交付](.scratch/feishu-capture/issues/06-feishu-integration.md)。首版整体验收仍待真实飞书联调。
+开发任务见 [任务列表](.scratch/feishu-capture/ticket-plan.md)，已实现 01–06 的开发交付；最新证据见 [06：插件交付](.scratch/feishu-capture/issues/06-feishu-integration.md)。首版整体验收以安装记录中的逐项结果为准。
 
 现有文档中指向 `../Personal-Agent-System-Design/` 的链接属于总体工作区历史资料，不包含在本独立仓库内；日常开发以本仓库当前需求及协议快照为准。需要追溯时在 Personal OS 工作区阅读原件。
 
@@ -58,7 +77,7 @@ npm start
 文件输入及分析失败演示：
 
 ```bash
-node src/cli.js --config examples/config.json < examples/messages.jsonl
+node src/cli.js --config config/config.json < examples/messages.jsonl
 node src/cli.js --analysis-failure < examples/messages.jsonl
 ```
 
@@ -68,7 +87,7 @@ node src/cli.js --analysis-failure < examples/messages.jsonl
 
 ```bash
 mkdir -p runtime
-cp examples/config.json runtime/config.json
+cp config/config.json runtime/config.json
 node src/cli.js --config runtime/config.json
 ```
 
@@ -118,8 +137,8 @@ node src/cli.js --config runtime/config.json
 
 ```bash
 npm run demo:recovery
-npm run start:durable -- --state-dir runtime/demo --config examples/config.json < examples/messages.jsonl
-npm run start:durable -- --state-dir runtime/demo --config examples/config.json --recover
+npm run start:durable -- --state-dir runtime/demo --config config/config.json < examples/messages.jsonl
+npm run start:durable -- --state-dir runtime/demo --config config/config.json --recover
 ```
 
 第一条命令启动独立子进程，在模拟事项创建成功后用 SIGKILL 中断，再用新进程恢复并断言恰有一个事项、一条回执。后两条命令使用同一目录保存和恢复进度；不传 `--recover` 时逐行接收 JSON 事件。原 `npm start` 仍是内存演示。
@@ -148,12 +167,12 @@ npm run start:durable -- --state-dir runtime/demo --config examples/config.json 
 
 ## 真实接入与 OpenClaw 使用
 
-- [Apple 安装与验收](docs/integration/apple.md)：真实 Inbox、8000 字原文、提醒和手动移入 Wiki。
-- [Gemini 运行与质量评估](docs/integration/model.md)：复用 gtd 凭据、结构化分析、预算及真实错误样例。
-- [已有 OpenClaw agent 如何安装整体](docs/integration/openclaw.md)：运行路径、插件与验证命令。
-- [给 OpenClaw 管理 agent 的交接](docs/integration/openclaw-handoff.md)：安装命令、配置模板、逐项验收、恢复和回滚。
+- [Apple 安装与验收](docs/deployment/apple.md)：真实 Inbox、8000 字原文、提醒和手动移入 Wiki。
+- [Gemini 运行与质量评估](docs/deployment/model.md)：复用 gtd 凭据、结构化分析、预算及真实错误样例。
+- [已有 OpenClaw agent 如何安装整体](docs/deployment/openclaw.md)：运行路径、插件与验证命令。
+- [给 OpenClaw 管理 agent 的交接](docs/deployment/openclaw-handoff.md)：安装命令、配置模板、逐项验收、恢复和回滚。
 
-`npm run start:model -- --config examples/model-config.json --state-dir runtime/model-demo` 调用真实 Gemini，Apple 为模拟。加 `--apple` 并提供真实账户配置才写入 Apple；不要把演示身份字段用于飞书鉴权。
+`npm run start:model -- --config config/model-config.json --state-dir runtime/model-demo` 调用真实 Gemini，Apple 为模拟。加 `--apple` 并提供真实账户配置才写入 Apple；不要把演示身份字段用于飞书鉴权。
 
 ## 当前限制与下一步
 
@@ -161,8 +180,8 @@ npm run start:durable -- --state-dir runtime/demo --config examples/config.json 
 - Apple 原文、提醒及设备通知已实测；缺失 Inbox 新建分支未在本机触发，真实 iCloud 冲突未注入。
 - 仅处理文字和文字内链接，不读取全文、不写 Wiki；链接由用户手动移动。
 - 当前模型适配器支持已核价的 Gemini Flash 型号；其他供应商需要适配，不能仅更改模型名称。
-- 飞书插件已通过本机 OpenClaw 2026.9.6 的隔离加载，尚未安装到运行网关；本地 JSONL 身份不能代替飞书可信事件。
-- 下一步由管理 OpenClaw 的 agent 按交接文档安装并做真实飞书验收；当前不宣称飞书生产链路已可用。
+- 飞书插件已安装到运行网关；本地 JSONL 身份不能代替飞书可信事件。
+- 下一步补齐真实故障恢复、容量与长期运行预算验收；现有测试预算不等于长期授权。
 
 ## OpenClaw 插件离线验收（任务 06）
 

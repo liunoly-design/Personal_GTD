@@ -10,7 +10,7 @@
 npm ci --ignore-scripts
 npm run build:apple
 printf '%s' '{"command":"authorize"}' | runtime/bin/pgtd-reminders
-node scripts/apple-setup.js
+node deploy/apple-setup.js
 npm run start:apple -- --config runtime/apple/config.json --state-dir runtime/apple
 ```
 
@@ -47,6 +47,6 @@ npm run start:apple -- --config runtime/apple/config.json --state-dir runtime/ap
 
 同一事件再次处理返回原 ID，没有新增条目。既有 Inbox 被绑定复用；**真实环境的“无 Inbox 时新建”分支未触发**，不删除用户列表来制造测试条件。未知结果与权限拒绝通过外部进程边界故障测试验证；真实响应丢失和 iCloud 同步冲突未人为制造。
 
-合成条目保留供用户检查，本程序未删除。`scripts/verify-apple.js --write-synthetic` 会真实写入三条样例，仅用于首次验收；事件 ID 固定，重跑时不会默默覆盖此前请求。
+合成条目保留供用户检查，本程序未删除。`deploy/verify-apple.js --write-synthetic` 会真实写入三条样例，仅用于首次验收；事件 ID 固定，重跑时不会默默覆盖此前请求。
 
 参考：[Apple EventKit 访问权限](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)、[EKEventStore](https://developer.apple.com/documentation/eventkit/ekeventstore)。

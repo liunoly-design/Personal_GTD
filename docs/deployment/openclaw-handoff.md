@@ -31,8 +31,8 @@ npm run openclaw:check -- --agent gtd
 
 通用模板：
 
-- `examples/openclaw-plugin-config.json`：插件配置，默认 `enabled: false`。
-- `examples/feishu-runtime-config.json`：Apple、Google 和预算配置。
+- `config/openclaw-plugin-config.json`：插件配置，默认 `enabled: false`。
+- `config/feishu-runtime-config.json`：Apple、Google 和预算配置。
 
 将模板复制到本机私有位置（如仓库忽略的 `runtime/feishu/`），目录 0700、文件 0600，并填入：
 

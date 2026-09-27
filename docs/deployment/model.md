@@ -7,7 +7,7 @@
 本机模拟 Apple、调用真实 Gemini：
 
 ```bash
-npm run start:model -- --config examples/model-config.json --state-dir runtime/model-demo
+npm run start:model -- --config config/model-config.json --state-dir runtime/model-demo
 ```
 
 每行输入 README 中的规范化 JSON 事件。`--recover` 恢复进度；`--apple` 切换为真实 Apple，配置须包含已绑定的 sourceId/listId。当前机器已生成私有组合配置，可运行：
@@ -18,7 +18,7 @@ npm run start:model -- --config runtime/model/apple-config.json --state-dir runt
 
 以上命令会调用真实模型；使用同一个 `usagePath` 累计本次测试预算，不能通过更换事件目录重置费用。不要把 demo-user/demo-chat 身份当成飞书授权。CLI 没有启动后台进程或发送飞书回执。
 
-可用字段见 `examples/model-config.json`。`authAgent` 选择现有 agent；`openclawPackageDir` 可指定 OpenClaw 安装目录。默认发现本机安装器的 `~/.openclaw/tools/node/lib/node_modules/openclaw`。当前 SDK 版本为 2026.9.6，其他安装方式/版本需重新检查 SDK。多个 Google 凭据配置时拒绝自动选择。
+可用字段见 `config/model-config.json`。`authAgent` 选择现有 agent；`openclawPackageDir` 可指定 OpenClaw 安装目录。默认发现本机安装器的 `~/.openclaw/tools/node/lib/node_modules/openclaw`。当前 SDK 版本为 2026.9.6，其他安装方式/版本需重新检查 SDK。多个 Google 凭据配置时拒绝自动选择。
 
 ## 模型能做什么
 
@@ -43,7 +43,7 @@ npm run start:model -- --config runtime/model/apple-config.json --state-dir runt
 
 ## 真实质量评估
 
-运行入口：`node scripts/verify-model.js --paid-evaluation`，只使用合成消息和模拟 Apple，不写私人内容或访问链接。反复执行会继续消耗同一预算；不是每次免费重跑。
+运行入口：`node deploy/verify-model.js --paid-evaluation`，只使用合成消息和模拟 Apple，不写私人内容或访问链接。反复执行会继续消耗同一预算；不是每次免费重跑。
 
 最终一轮 12 项行为样例全部符合预期，其中 10 项实际调用模型、2 项由代码直接处理：
 

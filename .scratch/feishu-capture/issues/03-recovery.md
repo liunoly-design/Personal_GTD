@@ -26,7 +26,7 @@ Spec: [首版规格](../spec.md)
 - `npm run check`、`git diff --check` 通过。
 - `npm run demo`、`npm run demo:reminders` 通过，原内存演示仍可运行。
 - `npm run demo:recovery` 通过：子进程在外部创建成功后 SIGKILL，新进程核对恢复，最终一个事项、一条回执。一次本机 Node 24.21.0、单事件、无网络运行用时 133 ms，含两个子进程启动；不是吞吐量或真实接入延迟结论。
-- `node src/durable-cli.js --state-dir runtime/task03-demo --config examples/config.json < examples/messages.jsonl` 与同目录 `--recover` 已运行；四条合成输入得到三条事项及四条模拟回执，恢复无待处理输出。
+- `node src/durable-cli.js --state-dir runtime/task03-demo --config config/config.json < examples/messages.jsonl` 与同目录 `--recover` 已运行；四条合成输入得到三条事项及四条模拟回执，恢复无待处理输出。
 - 日志使用 Node 内置 SQLite，不新增 npm 包；新建目录 0700、数据库 0600。原文仅在私有运行数据库内，持久化 CLI 和故障演示输出状态/ID/计数。普通聊天不占日志容量。
 
 ### 顺序审查

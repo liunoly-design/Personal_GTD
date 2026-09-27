@@ -5,7 +5,7 @@ State: in-progress
 
 日期：2026-09-27。用户已确认本规格的整体范围与测试接口符合预期；已完成任务 01–02 的本地模拟收集、提醒与澄清验收，任务 03–06 尚未实施，首版尚未完成。工程预算候选值及真实接入能力仍按下文验证，不代表已有实测结果。
 基准提交：`5fc44277b5f60ac4b444ffcdca5d2a31186c87f9`。
-来源：[原始问答与决定](discussion.md)、[GTD 框架核对](gtd-framework.md)、[项目需求](../../需求文档.md)。
+来源：[原始问答与决定](discussion.md)、[GTD 框架核对](gtd-framework.md)、[项目需求](../../docs/requirements/需求文档.md)。
 
 ## Problem Statement
 
