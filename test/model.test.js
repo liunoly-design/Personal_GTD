@@ -48,7 +48,7 @@ test('真实模型接口返回结构化建议和时间，公开收集入口校�
   assert.equal(model.usage().inputTokens,80);
 });
 
-test('自然语言收集只分析一次，讨论和未激活消息不创建', async () => {
+test('激活后默认收集只分析一次，模型讨论分类不覆盖用户收集约定', async () => {
   const reminders=createSimulatedReminders();
   let calls=0;
   const capture=createCapture({reminders,config:{modelIntents:true},analyze:async ({content})=>{
@@ -58,9 +58,9 @@ test('自然语言收集只分析一次，讨论和未激活消息不创建', as
   const base={senderId:'demo-user',conversationId:'demo-chat',type:'text',sentAt:'2026-09-27T10:00:00+08:00'};
   assert.equal((await capture.handle({...base,id:'n1',text:'小婕 GTD，帮我记一下周五的提案'})).status,'collected');
   assert.equal(calls,1);
-  assert.equal((await capture.handle({...base,id:'n2',text:'小婕 GTD，你怎么看周五的提案'})).status,'needs_instruction');
+  assert.equal((await capture.handle({...base,id:'n2',text:'小婕 GTD，你怎么看周五的提案'})).status,'collected');
   assert.equal((await capture.handle({...base,id:'n3',text:'帮我记一下周五的提案'})).status,'not_handled');
-  assert.equal((await reminders.listItems()).length,1);
+  assert.equal((await reminders.listItems()).length,2);
 });
 
 test('模型预算跨重启保留，失败不泄漏正文或密钥，明确收集仍降级保存', async t => {

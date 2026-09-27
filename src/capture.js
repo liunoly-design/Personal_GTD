@@ -214,15 +214,14 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
       const match = instruction.match(/^(?:请)?(?:帮我)?(?:收集|记录|记下|保存)(?:一下)?[\s:：，,]+([\s\S]*)$/u);
       const content = match?.[1].replace(/^[\s:：，,]+/u, '').trim();
       if (!content) {
-        if (config.modelIntents && instruction.trim()) {
-          const evaluated = await analyzeMessage(event, instruction);
-          if (['collect', 'remind'].includes(evaluated.analysis?.intent)) {
-            return save(event, instruction, evaluated.analysis.intent === 'remind', evaluated);
-          }
-          return { status: 'needs_instruction', analysis: evaluated.metrics,
-            receipt: '【模拟】尚未收集；请明确是否要收集或提醒，以及具体内容。' };
+        if (!instruction.trim() || match || /^(?:请)?(?:帮我)?(?:收集|记录|记下|保存|提醒我)(?:一下)?$/u.test(instruction.trim())) {
+          return { status: 'needs_instruction', receipt: '【模拟】请补充要收集的内容；未创建事项。' };
         }
-        return { status: 'needs_instruction', receipt: '【模拟】请明确要收集的内容；未创建事项。' };
+        if (config.modelIntents) {
+          const evaluated = await analyzeMessage(event, instruction);
+          return save(event, instruction, evaluated.analysis?.intent === 'remind', evaluated);
+        }
+        return save(event, instruction.trim());
       }
       return save(event, content);
     },

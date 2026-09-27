@@ -8,13 +8,13 @@ const event = (text, extra = {}) => ({
   sentAt: '2026-09-27T10:00:00+08:00', type: 'text', text, ...extra,
 });
 
-test('只有配置的完整开头激活词触发明确收集，普通聊天和讨论不写入', async () => {
+test('只有配置的完整开头激活词触发明确收集，普通聊天不写入，激活后的正文默认收集', async () => {
   const { capture, reminders } = setup({ config: { activation: '收件助手' } });
   for (const text of ['小婕 GTD，收集：想法', '正文提到收件助手，收集：想法', '收件助手扩展，收集：想法', '“收件助手，收集：想法”']) {
     assert.equal((await capture.handle(event(text))).status, 'not_handled');
   }
-  assert.equal((await capture.handle(event('收件助手，这篇文章怎么样：https://example.org'))).status, 'needs_instruction');
-  assert.equal((await reminders.listItems()).length, 0);
+  assert.equal((await capture.handle(event('收件助手，这篇文章怎么样：https://example.org'))).status, 'collected');
+  assert.equal((await reminders.listItems()).length, 1);
   const result = await capture.handle(event('收件助手，帮我记录一下：周末的想法'));
   assert.equal((await reminders.getItem(result.itemId)).title, '周末的想法');
 });
@@ -117,11 +117,11 @@ test('多个同名 Inbox 不随意写入，明确写入拒绝也不返回成功'
   assert.match(failed.receipt, /未成功/);
 });
 
-test('讨论收集本身不创建，模拟版只接受带分隔符的明确命令', async () => {
+test('激活词后的讨论文字也按用户默认收集约定保存', async () => {
   const { capture, reminders } = setup();
   const result = await capture.handle(event('小婕 GTD，收集是什么意思？'));
-  assert.equal(result.status, 'needs_instruction');
-  assert.equal((await reminders.listItems()).length, 0);
+  assert.equal(result.status, 'collected');
+  assert.equal((await reminders.listItems()).length, 1);
 });
 
 test('同一链接的同时确认只创建一次，取消后不会再收集', async () => {
@@ -145,4 +145,25 @@ test('多行原文逐字保留，标题保持单行且建议正常生成', async
   const item = await reminders.getItem(result.itemId);
   assert.equal(item.title, '第一行 第二行');
   assert.equal(item.notes, `原文：\n${text}\n\n小婕的建议：明确这件事的下一步处理方式。`);
+});
+
+test('激活后省略收集动词默认入箱，空内容不创建，分析失败仍保存', async () => {
+  for (const config of [{}, { modelIntents: true }]) {
+    const { capture, reminders } = setup({ config });
+    for (const text of ['小婕 gtd', '小婕 gtd 收集', '小婕 gtd 收集，']) {
+      assert.equal((await capture.handle(event(text))).status, 'needs_instruction');
+    }
+    assert.equal((await reminders.listItems()).length, 0);
+    const text = '小婕 gtd 明天找测试联系人确定吃饭地点';
+    const result = await capture.handle(event(text));
+    assert.equal(result.status, 'collected');
+    const item = await reminders.getItem(result.itemId);
+    assert.equal(item.title, '明天找测试联系人确定吃饭地点');
+    assert.ok(item.notes.includes(text));
+    assert.equal(item.remindAt, null);
+  }
+  const { capture, reminders } = setup({ config: { modelIntents: true }, analyze: async () => { throw Error('offline'); } });
+  const result = await capture.handle(event('小婕gtd 买牛奶'));
+  assert.equal(result.status, 'collected_analysis_failed');
+  assert.equal((await reminders.getItem(result.itemId)).title, '买牛奶');
 });
