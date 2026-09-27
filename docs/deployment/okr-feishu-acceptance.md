@@ -30,3 +30,11 @@
 macOS TCC 日志显示 Notes 脚本读取后，原生标签读取助手的 Accessibility 请求被拒绝（TCC reply=0）。系统认定的责任程序是 `~/.openclaw/tools/node-v24.21.0/bin/node`，不是 Codex。需要用户在“隐私与安全性 → 辅助功能”中开启该 node；没有尝试绕过系统权限。
 
 已把 `ACCESSIBILITY_DENIED` 与 Notes 的 `PERMISSION_DENIED` 分开；飞书将分别提示网关辅助功能或 Notes 自动化权限。新增回归测试先失败后通过。用户授权完成后重载并再次发送只读启动指令验收；旧错误回执记录保留，不篡改为成功。
+
+## 2026-09-28 权限复核
+
+用户反馈手动添加 node 后没有反应，设置的可访问界面列表未发现 node。通过一次性 launchd 作业，以网关使用的同一个 Node 可执行文件调用 Apple 的 AXIsProcessTrustedWithOptions（标准系统授权提示接口），结果返回 authorized；TCC 日志确认请求主体仍为该 Node 路径。此证据不能确定是之前用户操作延迟生效还是提示流程促成，不把“文件选择器拒绝可执行文件”当作已确定原因。
+
+随后在同一 Node / launchd 身份下只读检查现有两篇合成笔记：sameId、synthetic、tagsComplete 均为 true。两个临时 launchd 作业已移除。此为同程序身份的新进程验证，并非实际网关飞书事件的成功证据；仍需用户重新发送只读“讨论”指令完成入口与回执验收。没有新增笔记、正文写入或模型调用。
+
+网关重载以载入 a65781e 的准确权限提示。原错误事件/回执不修改；新启动指令是只读验收，可作为新消息发送。
