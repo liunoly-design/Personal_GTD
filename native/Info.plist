@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>local.personal-gtd.reminders</string>
+<key>CFBundleName</key><string>Personal GTD Reminders</string>
+<key>NSRemindersFullAccessUsageDescription</key><string>按明确 GTD 指令收集到选定 Inbox，并核对本工具创建的事项和提醒。</string>
+</dict></plist>

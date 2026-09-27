@@ -1,0 +1,119 @@
+import Foundation
+import EventKit
+
+struct BridgeError: Error { let code: String }
+let store = EKEventStore()
+let formatter = ISO8601DateFormatter()
+func string(_ input: [String: Any], _ key: String) throws -> String {
+    guard let value = input[key] as? String, !value.isEmpty else { throw BridgeError(code: "INVALID_INPUT") }
+    return value
+}
+func listValue(_ list: EKCalendar) -> [String: Any] {
+    return ["id": list.calendarIdentifier, "name": list.title, "sourceId": list.source.sourceIdentifier]
+}
+func itemValue(_ item: EKReminder) -> [String: Any] {
+    let date = item.alarms?.first?.absoluteDate
+    return ["id": item.calendarItemIdentifier, "listId": item.calendar.calendarIdentifier,
+            "title": item.title ?? "", "notes": item.notes ?? "", "remindAt": date.map { formatter.string(from: $0) } as Any? ?? NSNull(),
+            "marker": item.url?.absoluteString ?? ""]
+}
+func calendar(_ input: [String: Any]) throws -> EKCalendar {
+    let id = try string(input, "listId")
+    guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder), list.allowsContentModifications,
+          list.source.sourceIdentifier == (try string(input, "sourceId")) else { throw BridgeError(code: "LIST_UNAVAILABLE") }
+    return list
+}
+func reminders(_ list: EKCalendar) async throws -> [EKReminder] {
+    return try await withCheckedThrowingContinuation { continuation in
+        store.fetchReminders(matching: store.predicateForReminders(in: [list])) { values in
+            guard let values else { continuation.resume(throwing: BridgeError(code: "READ_FAILED")); return }
+            continuation.resume(returning: values)
+        }
+    }
+}
+func marker(_ op: String) throws -> String {
+    guard op.count == 64, op.allSatisfy({ $0.isHexDigit }) else { throw BridgeError(code: "INVALID_OPERATION") }
+    return "pgtd://capture/" + op
+}
+func execute(_ input: [String: Any]) async throws -> [String: Any] {
+    let command = try string(input, "command")
+    if command == "status" { return ["authorization": EKEventStore.authorizationStatus(for: .reminder).rawValue] }
+    if command == "authorize" {
+        let granted = try await store.requestFullAccessToReminders()
+        return ["granted": granted]
+    }
+    guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { throw BridgeError(code: "PERMISSION_DENIED") }
+    if command == "catalog" {
+        let lists = store.calendars(for: .reminder).filter { $0.allowsContentModifications }
+        return ["lists": lists.map(listValue), "defaultSourceId": store.defaultCalendarForNewReminders()?.source.sourceIdentifier as Any? ?? NSNull()]
+    }
+    let sourceId = try string(input, "sourceId")
+    guard let source = store.source(withIdentifier: sourceId) else { throw BridgeError(code: "SOURCE_UNAVAILABLE") }
+    if command == "lists" {
+        return ["lists": store.calendars(for: .reminder).filter { $0.source.sourceIdentifier == sourceId && $0.title == "Inbox" }.map(listValue)]
+    }
+    if command == "createList" {
+        let existing = store.calendars(for: .reminder).filter { $0.source.sourceIdentifier == sourceId && $0.title == "Inbox" }
+        if existing.count == 1 { return listValue(existing[0]) }
+        guard existing.isEmpty else { throw BridgeError(code: "AMBIGUOUS_LIST") }
+        let list = EKCalendar(for: .reminder, eventStore: store)
+        list.title = "Inbox"; list.source = source
+        try store.saveCalendar(list, commit: true)
+        return listValue(list)
+    }
+    let list = try calendar(input)
+    if command == "boundList" { return listValue(list) }
+    if command == "createItem" || command == "findCreate" {
+        let expected = try marker(string(input, "operationId"))
+        let found = try await reminders(list).filter { $0.url?.absoluteString.components(separatedBy: "?").first == expected }
+        if found.count == 1 { return command == "findCreate" ? ["state": "applied", "value": itemValue(found[0])] : itemValue(found[0]) }
+        guard found.isEmpty else { throw BridgeError(code: "AMBIGUOUS_OPERATION") }
+        if command == "findCreate" { return ["state": "unknown"] }
+        let item = EKReminder(eventStore: store)
+        item.calendar = list; item.title = try string(input, "title"); item.notes = try string(input, "notes")
+        item.url = URL(string: expected)
+        try store.save(item, commit: true)
+        return itemValue(item)
+    }
+    let id = try string(input, "itemId")
+    guard let item = store.calendarItem(withIdentifier: id) as? EKReminder,
+          item.calendar.source.sourceIdentifier == sourceId,
+          item.url?.scheme == "pgtd", item.url?.host == "capture" else { throw BridgeError(code: "ITEM_UNAVAILABLE") }
+    if command == "getItem" { return itemValue(item) }
+    guard item.calendar.calendarIdentifier == list.calendarIdentifier else { throw BridgeError(code: "ITEM_UNAVAILABLE") }
+    let op = try string(input, "operationId")
+    _ = try marker(op)
+    guard let date = formatter.date(from: try string(input, "remindAt")),
+          let zone = TimeZone(identifier: try string(input, "timeZone")) else { throw BridgeError(code: "INVALID_TIME") }
+    var url = URLComponents(url: item.url!, resolvingAgainstBaseURL: false)!
+    if command == "findReminder" {
+        let matches = url.queryItems?.contains(where: { $0.name == "reminder" && $0.value == op }) == true
+            && item.alarms?.first?.absoluteDate == date
+        return matches ? ["state": "applied", "value": itemValue(item)] : ["state": "unknown"]
+    }
+    guard command == "setReminder" else { throw BridgeError(code: "INVALID_COMMAND") }
+    guard date > Date() else { throw BridgeError(code: "PAST_TIME") }
+    var cal = Calendar(identifier: .gregorian); cal.timeZone = zone
+    var components = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+    components.timeZone = zone
+    item.dueDateComponents = components
+    item.alarms = [EKAlarm(absoluteDate: date)]
+    url.queryItems = [URLQueryItem(name: "reminder", value: op)]; item.url = url.url
+    try store.save(item, commit: true)
+    return itemValue(item)
+}
+
+Task {
+    do {
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        guard data.count <= 100_000, let input = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw BridgeError(code: "INVALID_INPUT") }
+        let value = try await execute(input)
+        let output = try JSONSerialization.data(withJSONObject: ["ok": true, "value": value], options: [.sortedKeys])
+        FileHandle.standardOutput.write(output); exit(0)
+    } catch {
+        let code = (error as? BridgeError)?.code ?? "APPLE_FAILURE"
+        let output = try! JSONSerialization.data(withJSONObject: ["ok": false, "code": code])
+        FileHandle.standardOutput.write(output); exit(1)
+    }
+}
+RunLoop.main.run()

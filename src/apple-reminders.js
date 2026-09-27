@@ -1,0 +1,104 @@
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { openOperationStore } from './operation-store.js';
+
+const binary = fileURLToPath(new URL('../runtime/bin/pgtd-reminders', import.meta.url));
+export function callApple(input, { signal, timeoutMs = 15000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'ignore'], signal });
+    let output = ''; let settled = false;
+    const timer = setTimeout(() => { child.kill(); finish(new Error('Apple timeout')); }, timeoutMs);
+    function finish(error, value) {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      if (error) reject(error); else resolve(value);
+    }
+    child.on('error', () => finish(new Error('Apple bridge unavailable')));
+    child.stdin.on('error', () => {});
+    child.stdout.on('data', data => {
+      output += data.toString();
+      if (output.length > 1_000_000) { child.kill(); finish(new Error('Apple response too large')); }
+    });
+    child.on('close', () => {
+      try {
+        const response = JSON.parse(output);
+        if (!response.ok) {
+          const denied = ['PERMISSION_DENIED', 'SOURCE_UNAVAILABLE', 'LIST_UNAVAILABLE', 'ITEM_UNAVAILABLE', 'PAST_TIME', 'INVALID_INPUT'];
+          const reason = denied.includes(response.code) ? response.code : 'APPLE_FAILURE';
+          finish(Object.assign(new Error(reason), { code: denied.includes(response.code) ? 'WRITE_REJECTED' : 'RESULT_UNKNOWN', reason }));
+        } else finish(null, response.value);
+      } catch { finish(new Error('Apple result unknown')); }
+    });
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+export function openAppleReminders({ statePath, sourceId, listId, bridge = callApple }) {
+  if (typeof sourceId !== 'string' || !sourceId) throw new Error('Apple source ID required');
+  const store = openOperationStore(statePath);
+  const saved = store.get('binding');
+  if (saved && (saved.sourceId !== sourceId || (listId && saved.listId !== listId))) {
+    store.close(); throw new Error('Apple binding changed; keep the original operation directory');
+  }
+  store.set('binding', saved ?? { sourceId, ...(listId ? { listId } : {}) });
+  function remember(value) {
+    if (value?.id && value.listId) store.set('item:' + value.id, { listId: value.listId });
+    return value;
+  }
+  async function write(input, operationId, options) {
+    if (!/^[a-f0-9]{64}$/u.test(operationId ?? '')) throw new Error('Operation ID required');
+    const request = { ...input, sourceId, operationId };
+    const old = store.get('operation:' + operationId);
+    if (old && JSON.stringify(old) !== JSON.stringify(request)) throw new Error('Operation conflict');
+    // Descriptor is for external reconciliation only, not proof a write succeeded.
+    store.set('operation:' + operationId, request);
+    return remember(await bridge(request, options));
+  }
+  return {
+    async listLists(options) {
+      const binding = store.get('binding');
+      if (binding.listId) {
+        const value = await bridge({ command: 'boundList', sourceId, listId: binding.listId }, options);
+        return [{ ...value, name: 'Inbox' }];
+      }
+      return (await bridge({ command: 'lists', sourceId }, options)).lists;
+    },
+    async createList(name, operationId, options) {
+      if (name !== 'Inbox') throw new Error('Only Inbox creation supported');
+      const value = await write({ command: 'createList' }, operationId, options);
+      store.set('binding', { sourceId, listId: value.id });
+      return value;
+    },
+    async createItem(input, operationId, options) {
+      const binding = store.get('binding');
+      if (binding.listId && binding.listId !== input.listId) throw new Error('Outside bound list');
+      store.set('binding', { sourceId, listId: input.listId });
+      return write({ command: 'createItem', ...input }, operationId, options);
+    },
+    async setReminder(itemId, input, operationId, options) {
+      const item = store.get('item:' + itemId);
+      if (!item) throw new Error('Unknown PGTD item');
+      return write({ command: 'setReminder', itemId, listId: item.listId, ...input }, operationId, options);
+    },
+    async getItem(itemId, options) {
+      const item = store.get('item:' + itemId);
+      if (!item) throw new Error('Unknown PGTD item');
+      return bridge({ command: 'getItem', sourceId, itemId, listId: item.listId }, options);
+    },
+    async getOperation(operationId, options) {
+      const request = store.get('operation:' + operationId);
+      if (!request) return { state: 'unknown' };
+      if (request.command === 'createList') {
+        const lists = (await bridge({ command: 'lists', sourceId }, options)).lists;
+        if (lists.length !== 1) return { state: 'unknown' };
+        store.set('binding', { sourceId, listId: lists[0].id });
+        return { state: 'applied', value: lists[0] };
+      }
+      const result = await bridge({ ...request, command: request.command === 'createItem' ? 'findCreate' : 'findReminder' }, options);
+      if (result.state === 'applied') remember(result.value);
+      // EventKit absence does not establish that an interrupted request never applied.
+      return result.state === 'applied' ? result : { state: 'unknown' };
+    },
+    close() { store.close(); },
+  };
+}
