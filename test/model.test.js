@@ -7,6 +7,27 @@ import { openGeminiAnalyzer } from '../src/gemini.js';
 import { createCapture } from '../src/capture.js';
 import { createSimulatedReminders } from '../src/simulation.js';
 
+test('独立任务的模型请求不携带前一任务或聊天历史', async t => {
+  const dir=mkdtempSync(join(tmpdir(),'pgtd-stateless-'));
+  const requests=[];
+  const model=openGeminiAnalyzer({statePath:join(dir,'usage.sqlite'),apiKey:async()=>'synthetic-key',
+    fetchImpl:async(_url,options)=>{
+      requests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({modelVersion:'gemini-3.8-flash',usageMetadata:{promptTokenCount:80,candidatesTokenCount:30},
+        candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({intent:'collect',title:'合成验收',suggestion:'核对收集结果。',reminder:{date:null,time:null,timeZone:'Asia/Shanghai'}})}]}}]}));
+    }});
+  t.after(async()=>{await model.close();rmSync(dir,{recursive:true,force:true});});
+  await model.analyze({content:'PGTD 安装验收 独立任务甲'});
+  await model.analyze({content:'PGTD 安装验收 独立任务乙'});
+  for(const request of requests){
+    assert.equal(request.contents.length,1);
+    assert.equal(request.contents[0].role,'user');
+    assert.equal(request.cachedContent,undefined);
+  }
+  assert.deepEqual(JSON.parse(requests[1].contents[0].parts[0].text),{content:'PGTD 安装验收 独立任务乙'});
+  assert.doesNotMatch(JSON.stringify(requests[1]),/独立任务甲/);
+});
+
 test('真实模型接口返回结构化建议和时间，公开收集入口校验后写入', async t => {
   const dir=mkdtempSync(join(tmpdir(),'pgtd-model-'));
   const model=openGeminiAnalyzer({ statePath:join(dir,'usage.sqlite'), apiKey: async ()=>'synthetic-key',
