@@ -8,7 +8,7 @@
 - [架构与数据](docs/requirements/架构与数据.md)：领域边界、Apple 工具和关联字段。
 - [工作流与Review](docs/requirements/工作流与Review.md)：日常行动与周期回顾。
 - [待确认问题](docs/requirements/待确认问题.md)：后续讨论入口。
-- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（尚未实现）。
+- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（F101 接入验证已完成，其余待开发）。
 - [功能实现清单](docs/requirements/功能实现清单.md)：全部功能的稳定 F 编号、V0–V5 规划分组、状态与 skill 开发流程；可按编号讨论和开发。
 - [参考项目](docs/requirements/参考项目.md)：历史资料包中的相关参考。
 
@@ -207,3 +207,14 @@ npm pack --pack-destination dist
 收集、设置提醒、补时间、链接确认已拆成独立动作文件；对应修改入口和局部测试命令见 [动作维护说明](docs/development/actions.md)。
 
 本机默认 `git push origin main` 使用 SSH，HTTPS 备用方式见 [Git 同步说明](docs/deployment/git-sync.md)。
+
+## F101：备忘录接入验证
+
+已在授权的 `iCloud / Notes` 创建、追加并读回同一篇合成笔记，验证新进程复用和过期快照拒绝。笔记保留供验收；正式 OKR 飞书入口仍未实现。
+
+```bash
+npm run test:notes
+npm run verify:notes -- --write-synthetic --account iCloud --folder Notes
+```
+
+第二条命令访问真实 Apple 备忘录，须有目标位置授权。复用 `runtime/notes/probe.sqlite`，不要换目录重试。权限、预算、恢复及 iCloud 并发限制见 [F101 接入说明](docs/deployment/notes.md)。
