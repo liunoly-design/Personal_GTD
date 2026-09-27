@@ -8,6 +8,7 @@
 - [架构与数据](docs/requirements/架构与数据.md)：领域边界、Apple 工具和关联字段。
 - [工作流与Review](docs/requirements/工作流与Review.md)：日常行动与周期回顾。
 - [待确认问题](docs/requirements/待确认问题.md)：后续讨论入口。
+- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联与 Inbox 整理的开发顺序（尚未实现）。
 - [参考项目](docs/requirements/参考项目.md)：历史资料包中的相关参考。
 
 总体讨论位于上级 Personal OS 项目；共享约定见 [跨项目协议快照](docs/context/跨项目协议快照.md)。原 demo 命令保持模拟；start:apple / start:model 会使用对应真实服务。
