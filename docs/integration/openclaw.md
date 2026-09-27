@@ -1,6 +1,6 @@
 # 在已有 OpenClaw 中安装 PGTD
 
-任务 06 已提供插件入口 `openclaw/index.js`、根目录 `openclaw.plugin.json`、配置模板和恢复入口。安装方无需重写收集业务，也无需新建 agent。**本仓库完成的是接入代码与离线验收；运行中的网关尚未安装，真实飞书闭环尚未验收。**
+任务 06 已提供插件入口 `openclaw/index.js`、根目录 `openclaw.plugin.json`、配置模板和恢复入口。安装方无需重写收集业务，也无需新建 agent。**2026-09-27 已链接安装并启用到本机网关，真实飞书闭环尚未验收。**详见 [本机安装记录](installation-2026-09-27.md)。
 
 交给管理 OpenClaw 的 agent 时，请先读 [安装与调试交接](openclaw-handoff.md)。当前本机已具备 Node 24.21.0、OpenClaw 2026.9.6、飞书插件 2026.9.6，以及已验证的 Apple helper 和默认账户 Inbox 绑定。
 
