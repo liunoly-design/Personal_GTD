@@ -68,9 +68,8 @@ test('明确收集在分析异常时仍保留完整原文，绝不生成假建�
   assert.match(result.receipt, /已收集.*分析未完成/);
 });
 
-test('未实现提醒、非文字消息及空收集不会误报成功', async () => {
+test('非文字消息及空收集不会误报成功', async () => {
   const { capture, reminders } = setup();
-  assert.equal((await capture.handle(event('小婕 GTD，提醒我明天交报价'))).status, 'unsupported');
   assert.equal((await capture.handle(event('小婕 GTD，收集：附件', { type: 'file' }))).status, 'unsupported');
   assert.equal((await capture.handle(event('', { type: 'image' }))).status, 'unsupported');
   assert.equal((await capture.handle(event('小婕 GTD，收集：   '))).status, 'needs_instruction');

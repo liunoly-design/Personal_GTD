@@ -1,5 +1,6 @@
 {
   "activation": "小婕 GTD",
+  "timeZone": "Asia/Shanghai",
   "allowedSenderIds": ["demo-user"],
   "allowedConversationIds": ["demo-chat"],
   "maxInputChars": 8000,

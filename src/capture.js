@@ -1,11 +1,14 @@
-export function createCapture({ reminders, analyze, config = {} }) {
+import { resolveReminder, validInstant, validTimeZone } from './reminder-time.js';
+
+export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString() }) {
   config = {
     activation: '小婕 GTD', allowedSenderIds: ['demo-user'], allowedConversationIds: ['demo-chat'],
-    maxInputChars: 8000, analysisTimeoutMs: 15000, ...structuredClone(config),
+    maxInputChars: 8000, analysisTimeoutMs: 15000, timeZone: 'Asia/Shanghai', ...structuredClone(config),
   };
   if (typeof config.activation !== 'string' || !config.activation.trim() || config.activation !== config.activation.trim()) {
     throw new Error('activation must be a nonempty trimmed string');
   }
+  if (typeof config.timeZone !== 'string' || !validTimeZone(config.timeZone)) throw new Error('Invalid timeZone');
   for (const name of ['maxInputChars', 'analysisTimeoutMs']) {
     if (!Number.isSafeInteger(config[name]) || config[name] < 1) throw new Error(`Invalid ${name}`);
   }
@@ -14,9 +17,10 @@ export function createCapture({ reminders, analyze, config = {} }) {
   }
   const activation = config.activation;
   const pending = new Map();
+  const reminderRequests = new Map();
   const key = (event, id = event.id) => JSON.stringify([event.senderId, event.conversationId, id]);
 
-  async function save(event, content) {
+  async function analyzeMessage(event, content, reminderRequest = false, previousReminder = null, clarification = false) {
     let analysis;
     const started = performance.now();
     const controller = new AbortController();
@@ -24,7 +28,8 @@ export function createCapture({ reminders, analyze, config = {} }) {
     let failureReason = null;
     try {
       analysis = await Promise.race([
-        Promise.resolve().then(() => analyze({ content, signal: controller.signal })),
+        Promise.resolve().then(() => analyze({ content, signal: controller.signal, reminderRequest,
+          sentAt: event.sentAt, timeZone: config.timeZone, previousReminder, clarification })),
         new Promise((_, reject) => {
           timer = setTimeout(() => {
             failureReason = 'timeout';
@@ -48,6 +53,11 @@ export function createCapture({ reminders, analyze, config = {} }) {
     }
     const metrics = { mode: 'simulation', calls: 1, latencyMs: performance.now() - started,
       inputTokens: null, outputTokens: null, failureReason };
+    return { analysis, metrics };
+  }
+
+  async function save(event, content, reminderRequest = false) {
+    const { analysis, metrics } = await analyzeMessage(event, content, reminderRequest);
     try {
       const candidates = (await reminders.listLists()).filter(x => x.name === 'Inbox');
       if (candidates.length > 1) {
@@ -59,6 +69,12 @@ export function createCapture({ reminders, analyze, config = {} }) {
         title: analysis?.title ?? [...content.replace(/\s+/gu, ' ')].slice(0, 80).join(''),
         notes: `原文：\n${event.text}` + (analysis ? `\n\n小婕的建议：${analysis.suggestion}` : ''),
       });
+      if (reminderRequest) {
+        const record = { event: structuredClone(event), itemId: item.id, listId: list.id };
+        reminderRequests.set(key(event), record);
+        record.result = await applyTime(record, analysis?.reminder, metrics);
+        return record.result;
+      }
       return {
         status: analysis ? 'collected' : 'collected_analysis_failed', listId: list.id, itemId: item.id,
         analysis: metrics,
@@ -72,10 +88,43 @@ export function createCapture({ reminders, analyze, config = {} }) {
     }
   }
 
+  async function applyTime(record, candidate, metrics) {
+    if (candidate) record.candidate = candidate;
+    const base = { itemId: record.itemId, listId: record.listId, analysis: metrics };
+    const resolved = resolveReminder(candidate);
+    if (!resolved) {
+      return { ...base, status: 'collected_awaiting_time',
+        receipt: metrics.failureReason
+          ? '【模拟】已收集，分析未完成，未设置提醒；请关联原请求回复具体日期、时间和时区。'
+          : '【模拟】已收集，未设置提醒；请关联原请求回复具体日期、时间和时区。' };
+    }
+    if (Date.parse(resolved.remindAt) <= Date.parse(now())) {
+      return { ...base, status: 'collected_awaiting_time', timeIssue: 'past',
+        receipt: '【模拟】已收集，但指定时间已过去，未设置提醒；请关联原请求回复新的日期和时间。' };
+    }
+    try {
+      await reminders.setReminder(record.itemId, resolved);
+      return { ...base, status: 'reminder_set', ...resolved,
+        receipt: `【模拟】已收集，提醒已设置：${resolved.localTime} ${resolved.timeZone}。` };
+    } catch (error) {
+      return { ...base, status: error?.code === 'WRITE_REJECTED' ? 'collected_reminder_failed' : 'reminder_result_unknown',
+        receipt: error?.code === 'WRITE_REJECTED'
+          ? '【模拟】已收集，但提醒设置失败；未重新创建事项。'
+          : '【模拟】已收集，提醒设置结果待核对；不会自动重试。' };
+    }
+  }
+
+  async function clarifyTime(record, event) {
+    if (record.result?.status === 'reminder_set' || record.result?.status === 'reminder_result_unknown') return record.result;
+    const { analysis, metrics } = await analyzeMessage(event, event.text, true, record.candidate, true);
+    record.result = await applyTime(record, analysis?.reminder, metrics);
+    return record.result;
+  }
+
   return {
     async handle(event) {
       if (!event || ['id', 'senderId', 'conversationId', 'type', 'sentAt'].some(field => typeof event[field] !== 'string' || !event[field])
-        || !Number.isFinite(Date.parse(event.sentAt)) || (event.type === 'text' && typeof event.text !== 'string')
+        || !validInstant(event.sentAt) || (event.type === 'text' && typeof event.text !== 'string')
         || (event.replyTo !== undefined && (typeof event.replyTo !== 'string' || !event.replyTo))) {
         return { status: 'invalid_event', receipt: '【模拟】消息元数据无效；未创建事项。' };
       }
@@ -86,7 +135,14 @@ export function createCapture({ reminders, analyze, config = {} }) {
       if ([...event.text].length > config.maxInputChars) {
         return { status: 'input_too_large', receipt: '【模拟】内容超过本地收集容量，请拆分后再收集；未保存或截断原文。' };
       }
-      const waiting = event.replyTo && pending.get(key(event, event.replyTo));
+      const activated = event.text.startsWith(activation)
+        && (event.text.length === activation.length || /^[\s，,:：]/u.test(event.text.slice(activation.length)));
+      const timeRequest = !activated && event.replyTo && reminderRequests.get(key(event, event.replyTo));
+      if (timeRequest) {
+        timeRequest.queue = (timeRequest.queue ?? Promise.resolve()).then(() => clarifyTime(timeRequest, event));
+        return timeRequest.queue;
+      }
+      const waiting = !activated && event.replyTo && pending.get(key(event, event.replyTo));
       if (waiting) {
         if (waiting.result) return waiting.result;
         if (/^(?:确认|是|是的|收集|好的)[。！!]?$/u.test(event.text.trim())) {
@@ -99,12 +155,22 @@ export function createCapture({ reminders, analyze, config = {} }) {
         }
         return { status: 'awaiting_confirmation', receipt: '【模拟】请回复“确认”或“取消”；未创建事项。' };
       }
-      if (!event.text.startsWith(activation)) return { status: 'not_handled', receipt: null };
+      if (!activated) {
+        const ownPending = [...reminderRequests.values()].some(record => record.event.senderId === event.senderId
+          && record.event.conversationId === event.conversationId && record.result?.status === 'collected_awaiting_time');
+        if (ownPending && /^(?:\d{1,4}[:\-]|今天|明天|后天|下午|上午|北京时间|\[)/u.test(event.text.trim())) {
+          return { status: 'needs_target', receipt: '【模拟】请关联需要补充时间的原请求；尚未更新任何事项。' };
+        }
+        return { status: 'not_handled', receipt: null };
+      }
       const remainder = event.text.slice(activation.length);
       if (remainder && !/^[\s，,:：]/u.test(remainder)) return { status: 'not_handled', receipt: null };
       const instruction = remainder.replace(/^[\s，,:：]+/u, '');
-      if (/^(?:请)?(?:帮我)?提醒/u.test(instruction)) {
-        return { status: 'unsupported', receipt: '【模拟】本任务尚不支持设置提醒时间；未创建事项。' };
+      const reminder = instruction.match(/^(?:请)?(?:帮我)?提醒我([\s\S]+)$/u);
+      if (reminder && reminder[1].trim()) {
+        const existing = reminderRequests.get(key(event));
+        if (existing?.result) return existing.result;
+        return save(event, reminder[1].trim(), true);
       }
       if (/^https?:\/\/\S+$/u.test(instruction.trim())) {
         const existing = pending.get(key(event));

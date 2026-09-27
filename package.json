@@ -2,11 +2,17 @@
   "name": "personal-gtd",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/capture.js && node --check src/simulation.js && node --check src/cli.js",
+    "check": "node --check src/capture.js && node --check src/simulation.js && node --check src/reminder-time.js && node --check src/cli.js",
     "demo": "node src/cli.js --config examples/config.json < examples/messages.jsonl",
+    "demo:reminders": "node examples/reminders.js",
     "start": "node src/cli.js"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "0.5.1"
   }
 }
