@@ -25,6 +25,15 @@ test('插件只接管授权的 GTD 消息，不调用宿主模型或重复回执
   await h.service.stop();assert.equal(closed,1);
 });
 
+test('飞书自然语言不具备控制命令授权标志时仍接管白名单收集',async()=>{
+  const h=host();let handled=0;
+  createPlugin({openRuntime:async()=>({handle:async()=>{handled++;return {status:'collected',delivery:'sent'};},close:async()=>{}})}).register(h.api);
+  const result=await h.hook({ctx:{...ctx,rawText:undefined,RawBody:ctx.rawText,CommandAuthorized:false},sendPolicy:'allow'},h.dispatch);
+  assert.equal(result?.handled,true);
+  assert.equal(handled,1);
+  await h.service.stop();
+});
+
 test('宿主禁止发送、取消或重定向时不写入；运行失败仍接管并给准确失败提示',async()=>{
   let opened=0;
   const h=host();

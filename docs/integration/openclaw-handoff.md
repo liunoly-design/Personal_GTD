@@ -125,7 +125,7 @@ openclaw plugins doctor --json
 
 | 现象 | 先核对 |
 | --- | --- |
-| 仍由小婕普通聊天回答 | 网关是否加载插件、入口 agent/account/白名单是否匹配、CommandAuthorized 是否为 true、宿主是否限制 runtime takeover |
+| 仍由小婕普通聊天回答 | 网关是否加载最新插件、入口 agent/account/白名单和激活词是否匹配、宿主是否限制 runtime takeover；`CommandAuthorized` 是控制命令标志，自然语言通常为 false，不能用它作为 PGTD 业务授权 |
 | 未确认完成 | 原消息查询权限、原始类型/身份、私有路径、Feishu 已解析凭据、Apple 授权；不能假定没有写入 |
 | 已收集但分析未完成 | Google profile、模型预算/限流/超时，Apple 原文已保存，不要重新发送收集 |
 | delivery=pending | 回执发送结果未知；Apple 可能已成功，先核对实际事项与飞书回执 |

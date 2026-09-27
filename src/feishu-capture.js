@@ -23,7 +23,9 @@ function activated(text, config) {
 }
 export function acceptsFeishuContext(ctx, config) {
   return ctx.Provider === 'feishu' && ctx.AccountId === config.accountId && ctx.AgentId === config.entryAgentId
-    && ctx.CommandAuthorized === true && !ctx.SenderIsBot
+    // CommandAuthorized describes host control commands, not natural-language capture.
+    // Business authorization is the explicit scope below plus the original-message API check.
+    && !ctx.SenderIsBot
     && config.allowedSenderIds.includes(ctx.SenderId) && config.allowedConversationIds.includes(ctx.NativeChannelId)
     && (activated(ctx.rawText ?? ctx.RawBody, config) || Boolean(ctx.ReplyToIdFull ?? ctx.ReplyToId));
 }

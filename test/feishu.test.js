@@ -32,7 +32,7 @@ function fixture(t, options={}) {
 
 test('可信飞书事件收集原文，重投和重启不重复 Apple 或回执',async t=>{
   const f=fixture(t);
-  assert.equal((await f.capture.handle(context())).status,'collected');
+  assert.equal((await f.capture.handle({...context(),CommandAuthorized:false})).status,'collected');
   await f.restart();
   await f.capture.handle(context());
   const items=await f.reminders.listItems();
@@ -44,7 +44,7 @@ test('可信飞书事件收集原文，重投和重启不重复 Apple 或回执'
 test('无激活、未授权或错误入口在读取原消息前拦截，原消息身份也须匹配',async t=>{
   const f=fixture(t);
   for(const patch of [{Provider:'other'},{AccountId:'other'},{AgentId:'wiki'},{SenderId:'ou_other'},
-    {NativeChannelId:'oc_other'},{CommandAuthorized:false},{rawText:'引用：小婕 GTD，收集：不应收集'}]) {
+    {NativeChannelId:'oc_other'},{SenderIsBot:true},{rawText:'引用：小婕 GTD，收集：不应收集'}]) {
     assert.equal((await f.capture.handle({...context(),...patch})).status,'not_handled');
   }
   assert.equal(f.reads,0);
