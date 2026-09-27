@@ -1,5 +1,10 @@
+import { createMessageAnalyzer } from './analyze-message.js';
+import { createCollector } from './actions/collect.js';
+import { createReminderSetter } from './actions/set-reminder.js';
+import { createReminderClarifier } from './actions/clarify-reminder.js';
+import { confirmLink } from './actions/confirm-link.js';
 import { activationLength } from './activation.js';
-import { resolveReminder, validInstant, validTimeZone } from './reminder-time.js';
+import { validInstant, validTimeZone } from './reminder-time.js';
 
 export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString(), checkpoint = {} }) {
   config = {
@@ -21,108 +26,15 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
   const reminderRequests = new Map(structuredClone(checkpoint.reminderRequests ?? []));
   const key = (event, id = event.id) => JSON.stringify([event.senderId, event.conversationId, id]);
 
-  async function analyzeMessage(event, content, reminderRequest = false, previousReminder = null, clarification = false) {
-    let analysis;
-    const started = performance.now();
-    const controller = new AbortController();
-    let timer;
-    let failureReason = null;
-    try {
-      analysis = await Promise.race([
-        Promise.resolve().then(() => analyze({ content, signal: controller.signal, reminderRequest,
-          sentAt: event.sentAt, timeZone: config.timeZone, previousReminder, clarification })),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => {
-            failureReason = 'timeout';
-            controller.abort();
-            reject(new Error('Analysis timeout'));
-          }, config.analysisTimeoutMs);
-        }),
-      ]);
-      if (!analysis || typeof analysis.title !== 'string' || !analysis.title.trim()
-        || [...analysis.title].length > 80 || /[\r\n]/u.test(analysis.title)
-        || typeof analysis.suggestion !== 'string' || !analysis.suggestion.trim()
-        || [...analysis.suggestion].length > 120 || !/^[^\r\n。！？!?.]+[。！？!?.]?$/u.test(analysis.suggestion)) {
-        failureReason = 'invalid_output';
-        throw new Error('Invalid analysis output');
-      }
-    } catch {
-      analysis = null;
-      failureReason ??= 'analysis_error';
-    } finally {
-      clearTimeout(timer);
-    }
-    const metrics = { mode: analyze.mode ?? 'simulation', calls: 1, latencyMs: performance.now() - started,
-      inputTokens: null, outputTokens: null, ...analysis?.telemetry, failureReason };
-    return { analysis, metrics };
-  }
-
-  async function save(event, content, reminderRequest = false, evaluated) {
-    const { analysis, metrics } = evaluated ?? await analyzeMessage(event, content, reminderRequest);
-    try {
-      const candidates = (await reminders.listLists()).filter(x => x.name === 'Inbox');
-      if (candidates.length > 1) {
-        return { status: 'needs_list_selection', receipt: '【模拟】存在多个 Inbox，请先明确目标列表；未创建事项。', analysis: metrics };
-      }
-      const list = candidates[0] ?? await reminders.createList('Inbox');
-      const item = await reminders.createItem({
-        listId: list.id,
-        title: analysis?.title ?? [...content.replace(/\s+/gu, ' ')].slice(0, 80).join(''),
-        notes: `原文：\n${event.text}` + (analysis ? `\n\n小婕的建议：${analysis.suggestion}` : ''),
-      });
-      if (reminderRequest) {
-        const record = { event: structuredClone(event), itemId: item.id, listId: list.id };
-        reminderRequests.set(key(event), record);
-        record.result = await applyTime(record, analysis?.reminder, metrics);
-        return record.result;
-      }
-      return {
-        status: analysis ? 'collected' : 'collected_analysis_failed', listId: list.id, itemId: item.id,
-        analysis: metrics,
-        receipt: analysis ? '【模拟】已收集到 Inbox；未设置提醒。' : '【模拟】已收集到 Inbox，分析未完成；未设置提醒。',
-      };
-    } catch (error) {
-      return { status: error?.code === 'WRITE_REJECTED' ? 'failed' : 'result_unknown', analysis: metrics,
-        receipt: error?.code === 'WRITE_REJECTED'
-          ? '【模拟】写入未成功；本版本不自动重试。'
-          : '【模拟】操作结果待核对；本版本不自动核对或重试，请勿直接重复提交。' };
-    }
-  }
-
-  async function applyTime(record, candidate, metrics) {
-    if (candidate) record.candidate = candidate;
-    const base = { itemId: record.itemId, listId: record.listId, analysis: metrics };
-    const resolved = resolveReminder(candidate);
-    if (!resolved) {
-      return { ...base, status: 'collected_awaiting_time',
-        receipt: metrics.failureReason
-          ? '【模拟】已收集，分析未完成，未设置提醒；请关联原请求回复具体日期、时间和时区。'
-          : '【模拟】已收集，未设置提醒；请关联原请求回复具体日期、时间和时区。' };
-    }
-    try {
-      const past = Date.parse(resolved.remindAt) <= Date.parse(now());
-      const alreadyApplied = past && await reminders.reconcileReminder?.(record.itemId, resolved);
-      if (past && !alreadyApplied) {
-        return { ...base, status: 'collected_awaiting_time', timeIssue: 'past',
-          receipt: '【模拟】已收集，但指定时间已过去，未设置提醒；请关联原请求回复新的日期和时间。' };
-      }
-      if (!alreadyApplied) await reminders.setReminder(record.itemId, resolved);
-      return { ...base, status: 'reminder_set', ...resolved,
-        receipt: `【模拟】已收集，提醒已设置：${resolved.localTime} ${resolved.timeZone}。` };
-    } catch (error) {
-      return { ...base, status: error?.code === 'WRITE_REJECTED' ? 'collected_reminder_failed' : 'reminder_result_unknown',
-        receipt: error?.code === 'WRITE_REJECTED'
-          ? '【模拟】已收集，但提醒设置失败；未重新创建事项。'
-          : '【模拟】已收集，提醒设置结果待核对；不会自动重试。' };
-    }
-  }
-
-  async function clarifyTime(record, event) {
-    if (record.result?.status === 'reminder_set' || record.result?.status === 'reminder_result_unknown') return record.result;
-    const { analysis, metrics } = await analyzeMessage(event, event.text, true, record.candidate, true);
-    record.result = await applyTime(record, analysis?.reminder, metrics);
+  const analyzeMessage = createMessageAnalyzer({ analyze, config });
+  const applyTime = createReminderSetter({ reminders, now });
+  const clarifyTime = createReminderClarifier({ analyzeMessage, applyTime });
+  const save = createCollector({ reminders, analyzeMessage, async startReminder(event, itemId, listId, candidate, metrics) {
+    const record = { event: structuredClone(event), itemId, listId };
+    reminderRequests.set(key(event), record);
+    record.result = await applyTime(record, candidate, metrics);
     return record.result;
-  }
+  } });
 
   function validate(event) {
     if (!event || ['id', 'senderId', 'conversationId', 'type', 'sentAt'].some(field => typeof event[field] !== 'string' || !event[field])
@@ -177,16 +89,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
       }
       const waiting = !isActivated && event.replyTo && pending.get(key(event, event.replyTo));
       if (waiting) {
-        if (waiting.result) return waiting.result;
-        if (/^(?:确认|是|是的|收集|好的)[。！!]?$/u.test(event.text.trim())) {
-          waiting.result = save(waiting.event, waiting.content);
-          return waiting.result;
-        }
-        if (/^(?:取消|不|不要|不用)[。！!]?$/u.test(event.text.trim())) {
-          waiting.result = { status: 'cancelled', receipt: '【模拟】已取消收集，未创建事项。' };
-          return waiting.result;
-        }
-        return { status: 'awaiting_confirmation', receipt: '【模拟】请回复“确认”或“取消”；未创建事项。' };
+        return confirmLink(waiting, event, save);
       }
       if (!isActivated) {
         const ownPending = [...reminderRequests.values()].some(record => record.event.senderId === event.senderId

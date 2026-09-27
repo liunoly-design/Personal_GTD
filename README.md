@@ -19,7 +19,7 @@
 | `docs/requirements/` | 需求、架构、工作流、待确认问题与参考资料 |
 | `docs/deployment/` | Apple、模型与 OpenClaw 安装说明、交接与验收记录 |
 | `docs/agents/`、`docs/context/` | 开发约定与跨项目协议快照 |
-| `src/` | 收集、提醒、持久化、适配器与 CLI 业务代码 |
+| `src/`、`src/actions/` | 业务入口、独立动作模块、持久化、适配器与 CLI |
 | `openclaw/`、`native/` | OpenClaw 插件入口与 Apple Swift 桥接源码 |
 | `deploy/` | 安装、编译、验证与恢复脚本 |
 | `config/` | 可提交的合成配置示例 |
@@ -199,3 +199,9 @@ npm pack --pack-destination dist
 触发词兼容大小写、词间零个或多个空格及前导空白。例如 `小婕gtd 买牛奶`、`小婕 gtd 收集 买牛奶`、`小婕 GTD，收集，买牛奶` 都会收集。触发词后仍需空格、逗号或冒号。
 
 用户最新约定优先于上面的历史规则：激活后有正文就默认收集，不再让模型的讨论/不确定分类阻止保存；不希望收集的普通聊天不加触发词。仅有触发词或“收集”等空指令时提示补充内容，不创建空事项。裸链接仍先确认；明确提醒指令继续走提醒与时间澄清流程。默认收集不等于承诺执行。
+
+## 按功能升级与代码同步
+
+收集、设置提醒、补时间、链接确认已拆成独立动作文件；对应修改入口和局部测试命令见 [动作维护说明](docs/development/actions.md)。
+
+本机默认 `git push origin main` 使用 SSH，HTTPS 备用方式见 [Git 同步说明](docs/deployment/git-sync.md)。
