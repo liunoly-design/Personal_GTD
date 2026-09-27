@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { callNotes } from '../src/apple-notes.js';
 import { openAppleReminders } from '../src/apple-reminders.js';
 import { openGeminiAnalyzer } from '../src/gemini.js';
 import { openClawGoogleKey } from '../src/openclaw-auth.js';
@@ -33,7 +34,7 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
       apiKey });
     reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
-      reminders, feishu, analyze: model.analyze });
+      reminders, feishu, analyze: model.analyze, notesBridge: callNotes });
     return { handle: (ctx, options) => capture.handle(ctx, options), recover: () => capture.recover(), async close() {
       await capture.close(); reminders.close(); await model.close();
     } };

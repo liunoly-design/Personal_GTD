@@ -8,7 +8,7 @@
 - [架构与数据](docs/requirements/架构与数据.md)：领域边界、Apple 工具和关联字段。
 - [工作流与Review](docs/requirements/工作流与Review.md)：日常行动与周期回顾。
 - [待确认问题](docs/requirements/待确认问题.md)：后续讨论入口。
-- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（F101 接入验证已完成，其余待开发）。
+- [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（F101/F102 接入验证和 F103 日志代码已完成，F103 尚未部署）。
 - [功能实现清单](docs/requirements/功能实现清单.md)：全部功能的稳定 F 编号、V0–V5 规划分组、状态与 skill 开发流程；可按编号讨论和开发。
 - [参考项目](docs/requirements/参考项目.md)：历史资料包中的相关参考。
 
@@ -226,3 +226,16 @@ npm run probe:tags
 ```
 
 仅清点本机 SDK、系统脚本字典与快捷指令 CLI，不读取私人任务或写入标签。现有 EventKit/JXA 没有公开标签字段；快捷指令有官方标签支持，真实闭环待配置与验收。详见 [F102 调查与验证入口](docs/deployment/reminder-tags.md)。
+
+## OKR 日志（F103，尚未部署）
+
+实现飞书 `小婕 gtd okr 讨论` 启动固定备忘录、回复记录原文、暂停及重启续接。`#O1`、`#KR1` 等标签文本保留；本次使用一篇日志，目标定稿和 Review 分析待后续实现。
+
+```bash
+npm run test:okr
+npm run demo:okr
+# 真实写入：复用已授权并经过 F101 验证的合成笔记
+npm run verify:okr -- --write-synthetic
+```
+
+正式启用需要私有运行配置中的 `okr` 位置和正式文档授权，详见 [配置、用法与验证限制](docs/deployment/okr.md)。本轮没有部署或发送真实飞书消息。

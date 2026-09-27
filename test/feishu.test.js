@@ -22,7 +22,7 @@ function fixture(t, options={}) {
     const result={message_id:'om_bot_'+(sent.length+1),chat_id:input.conversationId};sent.push({...input,...result});
     if(options.loseReply) throw new Error('response lost');return result;
   }};
-  const make=()=>openFeishuCapture({stateDir:dir,config:{...scope,...options.config},reminders,feishu,
+  const make=()=>openFeishuCapture({stateDir:dir,config:{...scope,...options.config},reminders,feishu,notesBridge:options.notesBridge,
     analyze:async args=>{calls++;return simulatedAnalysis(args);},now:()=> '2026-09-27T02:00:00Z'});
   let capture=make();
   t.after(async()=>{await capture.close();reminders.close();rmSync(dir,{recursive:true,force:true});});
@@ -178,4 +178,59 @@ test('激活词兼容大小写和空格，保留正文且不扩大触发或授�
   }
   assert.equal((await f.capture.handle({ ...context('om_denied', '小婕gtd，收集：越权'), SenderId: 'ou_other' })).status, 'not_handled');
   assert.equal((await f.reminders.listItems()).length, 4);
+});
+
+test('OKR 未配置时明确提示，启动表达绝不落入 Inbox', async t => {
+  const f=fixture(t);
+  const text='小婕 gtd okr 讨论';
+  f.messages.set('om_okr',message('om_okr',text));
+  const result=await f.capture.handle(context('om_okr',text));
+  assert.equal(result.status,'okr_unavailable');
+  assert.equal((await f.reminders.listItems()).length,0);
+  assert.equal(f.calls,0);
+});
+
+test('飞书 OKR 关联回复跨重启保存标签原文，暂停后不写，不调用收集模型', async t => {
+  const notes=[];
+  const notesBridge=async r=>{
+    if(r.command==='bind') return {accountId:'a',folderId:'f'};
+    if(r.command==='create'){const n={id:'note1',body:r.body,plaintext:r.body};notes.push(n);return {...n};}
+    const n=notes.find(n=>n.id===r.noteId);
+    if(r.command==='append'){assert.equal(n.body,r.expectedBody);n.body+=r.addition;n.plaintext=n.body;}
+    return {...n};
+  };
+  const f=fixture(t,{config:{okr:{account:'iCloud',folder:'Notes'}},notesBridge});
+  const start='小婕 gtd okr 讨论';
+  f.messages.set('om_okr',message('om_okr',start));
+  assert.equal((await f.capture.handle(context('om_okr',start))).status,'okr_open');
+  await f.restart();
+  const parent=f.sent[0].message_id;
+  f.messages.set('om_answer',message('om_answer','#O1 合成目标 #KR1 合成结果',{parent_id:parent}));
+  const ctx={...context('om_answer','#O1 合成目标 #KR1 合成结果'),ReplyToId:parent};
+  assert.equal((await f.capture.handle(ctx)).status,'okr_saved');
+  await f.capture.handle(ctx);
+  assert.equal(notes[0].body.split('合成目标').length,2);
+  const pause='小婕 GTD okr 暂停';
+  f.messages.set('om_pause',message('om_pause',pause));
+  assert.equal((await f.capture.handle(context('om_pause',pause))).status,'okr_paused');
+  f.messages.set('om_later',message('om_later','暂不保存',{parent_id:parent}));
+  assert.equal((await f.capture.handle({...context('om_later','暂不保存'),ReplyToId:parent})).status,'okr_paused');
+  assert.doesNotMatch(notes[0].body,/暂不保存/);
+  assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,0);
+});
+
+test('OKR 失败和未知子命令不回落收集，伪造来源也不能触发 Notes', async t => {
+  let calls=0;
+  const f=fixture(t,{config:{okr:{account:'iCloud',folder:'Notes'}},notesBridge:async()=>{calls++;throw new Error('PERMISSION_DENIED');}});
+  const start='小婕 GTD okr 讨论';
+  f.messages.set('om_bad',message('om_bad',start,{sender:{id:'ou_other',id_type:'open_id',sender_type:'user'}}));
+  assert.equal((await f.capture.handle(context('om_bad',start))).status,'invalid_source');
+  assert.equal(calls,0);
+  f.messages.set('om_okr',message('om_okr',start));
+  const failed=await f.capture.handle(context('om_okr',start));
+  assert.equal(failed.status,'okr_error');assert.equal(failed.code,'PERMISSION_DENIED');
+  const unknown='小婕 GTD okr 删除全部';
+  f.messages.set('om_unknown',message('om_unknown',unknown));
+  assert.equal((await f.capture.handle(context('om_unknown',unknown))).status,'okr_help');
+  assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,0);
 });

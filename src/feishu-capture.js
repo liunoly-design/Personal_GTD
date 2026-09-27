@@ -1,3 +1,4 @@
+import { openOkrSession } from './okr-session.js';
 import { activationLength } from './activation.js';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ export function acceptsFeishuContext(ctx, config) {
     && (activated(ctx.rawText ?? ctx.RawBody, config) || Boolean(ctx.ReplyToIdFull ?? ctx.ReplyToId)
       || timeCandidate(ctx.rawText ?? ctx.RawBody));
 }
-export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now }) {
+export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now, notesBridge }) {
   config = structuredClone(config);
   validateFeishuScope(config);
   const maxEvents = config.maxStoredEvents ?? 1000;
@@ -70,7 +71,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return value;
     },
   };
-  let capture;
+  let capture, okr;
   try {
     const scopedReminders = {
       listLists: ({ signal } = {}) => reminders.listLists(options(signal)),
@@ -81,10 +82,15 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     };
     const scopedAnalyze = args => analyze({ ...args, ...options(args.signal) });
     scopedAnalyze.mode = analyze.mode;
+    if (config.okr) {
+      if (typeof notesBridge !== 'function') throw new Error('Notes bridge required');
+      okr = openOkrSession({ statePath: join(stateDir, 'okr.sqlite'), config: config.okr,
+        bridge: request => { options(); return notesBridge(request); } });
+    }
     capture = openDurableCapture({ journalPath: join(stateDir, 'capture.sqlite'), reminders: scopedReminders, receipts, analyze: scopedAnalyze,
       config: { ...config, externalTimeoutMs: 20000 }, now });
     store.set('account', config.accountId);
-  } catch (error) { store.close(); throw error; }
+  } catch (error) { void okr?.close(); store.close(); throw error; }
   async function handle(ctx) {
     if (!acceptsFeishuContext(ctx, config)) return { status: 'not_handled' };
     const replyTo = ctx.ReplyToIdFull ?? ctx.ReplyToId;
@@ -106,9 +112,36 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       ...(message.parent_id ? { replyTo: message.parent_id } : {}) };
     const parent = store.get('reply:' + message.parent_id) ?? store.get('source:' + message.parent_id);
     if (parent?.senderId === event.senderId && parent.conversationId === event.conversationId) event.replyTo = parent.rootId;
+    const prefix = activationLength(event.text, config.activation);
+    const command = prefix ? event.text.slice(prefix).replace(/^[\s，,:：]+/u, '') : '';
+    const explicitOkr = /^okr(?=$|[\s，,:：])/iu.test(command);
+    const linkedOkr = !prefix && parent?.route === 'okr' && parent.senderId === event.senderId
+      && parent.conversationId === event.conversationId;
+    const isOkr = explicitOkr || linkedOkr;
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
-      rootId: activated(event.text, config) ? id : event.replyTo ?? id });
-    const result = await capture.handle(event);
+      rootId: prefix ? id : event.replyTo ?? id, ...(isOkr ? { route: 'okr' } : {}) });
+    let result;
+    if (isOkr) {
+      const instruction = explicitOkr ? command.slice(3).replace(/^[\s，,:：]+/u, '') : '';
+      const action = linkedOkr ? 'record' : /^(讨论|续接)$/u.test(instruction) ? 'open'
+        : instruction === '暂停' ? 'pause' : /^记录[\s，,:：]/u.test(instruction) ? 'record' : null;
+      const text = linkedOkr ? event.text : action === 'record' ? instruction.replace(/^记录[\s，,:：]+/u, '') : '';
+      if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
+      else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 gtd okr 讨论”，回复关联消息记录文字，或使用“okr 记录：内容”“okr 暂停”。' };
+      else {
+        try { result = await okr.handle({ ...event, action, text }); }
+        catch (error) {
+          const code = ['INVALID_INPUT', 'CONFLICT', 'CAPACITY_EXCEEDED', 'BUDGET_EXHAUSTED', 'CREATE_RESULT_UNKNOWN',
+            'UPDATE_RESULT_UNKNOWN', 'READBACK_FAILED', 'PERMISSION_DENIED', 'LOCATION_NOT_UNIQUE'].includes(error.message)
+            ? error.message : 'NOTES_UNAVAILABLE';
+          const explanation = code === 'INVALID_INPUT' ? '请使用不超过 4000 字的非空文字。'
+            : code === 'PERMISSION_DENIED' ? '请检查备忘录访问权限。'
+            : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
+            : '请保留原消息，核对备忘录后再继续。';
+          result = { status: 'okr_error', code, receipt: `OKR 记录未确认完成。${explanation}` };
+        }
+      }
+    } else result = await capture.handle(event);
     if (result.receipt && !result.delivery) {
       try {
         await receipts.send({ conversationId: event.conversationId, replyTo: id, text: result.receipt },
@@ -138,6 +171,6 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return enqueue(() => handle(input), signal);
     },
     recover() { return enqueue(() => capture.recover()); },
-    async close() { if (closed) return; closed = true; await queue; await capture.close(); store.close(); },
+    async close() { if (closed) return; closed = true; await queue; await capture.close(); await okr?.close(); store.close(); },
   };
 }

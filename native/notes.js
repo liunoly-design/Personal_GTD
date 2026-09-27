@@ -28,7 +28,9 @@ function run() {
     if (folder.notes.length > 1000) fail('CAPACITY_EXCEEDED');
     var value;
     if (input.command === 'create') {
-      if (!/^PGTD F101 合成测试 PGTD-F101-[a-f0-9-]{36}$/.test(input.title) || input.body.length > 32768) fail('INVALID_INPUT');
+      var probeTitle = /^PGTD F101 合成测试 PGTD-F101-[a-f0-9-]{36}$/.test(input.title);
+      var okrTitle = input.title === 'PGTD OKR 日志' && /PGTD-OKR-[a-f0-9-]{36}/.test(input.body);
+      if ((!probeTitle && !okrTitle) || typeof input.body !== 'string' || input.body.length > 32768) fail('INVALID_INPUT');
       var note = app.Note({ body: input.body });
       folder.notes.push(note);
       value = snapshot(note);
