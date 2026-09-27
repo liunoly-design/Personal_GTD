@@ -260,3 +260,7 @@ npm run verify:notes-tags -- --write-synthetic
 ```
 
 复用已授权的两篇合成笔记。依赖登录桌面、Swift 和辅助功能权限，运行时需避免同时编辑 Notes；尚未部署到飞书。详见[原生标签验收及恢复](docs/deployment/notes-native-tags.md)。
+
+### 飞书合成验收入口
+
+已把本机飞书 OKR 配置绑定到上述两篇合成测试笔记，等待真实用户发送“小婕 gtd okr 讨论”验收。尚未声明端到端通过，暂勿录入正式目标；预算与状态见 [接入验收记录](docs/deployment/okr-feishu-acceptance.md)。
