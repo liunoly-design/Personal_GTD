@@ -21,13 +21,19 @@ function activated(text, config) {
   return typeof text === 'string' && text.startsWith(activation)
     && (text.length === activation.length || /^[\s，,:：]/u.test(text.slice(activation.length)));
 }
+// Only admits a candidate; the durable capture checks pending requests and
+// responds needs_target without guessing an item or calling the model.
+function timeCandidate(text) {
+  return typeof text === 'string' && /^(?:\d{1,4}[:\-]|今天|明天|后天|下午|上午|北京时间|\[)/u.test(text.trim());
+}
 export function acceptsFeishuContext(ctx, config) {
   return ctx.Provider === 'feishu' && ctx.AccountId === config.accountId && ctx.AgentId === config.entryAgentId
     // CommandAuthorized describes host control commands, not natural-language capture.
     // Business authorization is the explicit scope below plus the original-message API check.
     && !ctx.SenderIsBot
     && config.allowedSenderIds.includes(ctx.SenderId) && config.allowedConversationIds.includes(ctx.NativeChannelId)
-    && (activated(ctx.rawText ?? ctx.RawBody, config) || Boolean(ctx.ReplyToIdFull ?? ctx.ReplyToId));
+    && (activated(ctx.rawText ?? ctx.RawBody, config) || Boolean(ctx.ReplyToIdFull ?? ctx.ReplyToId)
+      || timeCandidate(ctx.rawText ?? ctx.RawBody));
 }
 export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now }) {
   config = structuredClone(config);
@@ -85,6 +91,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const replyTo = ctx.ReplyToIdFull ?? ctx.ReplyToId;
     const linked = store.get('reply:' + replyTo) ?? store.get('source:' + replyTo);
     if (!activated(ctx.rawText ?? ctx.RawBody, config)
+      && !timeCandidate(ctx.rawText ?? ctx.RawBody)
       && !(linked?.senderId === ctx.SenderId && linked.conversationId === ctx.NativeChannelId)) return { status: 'not_handled' };
     const id = ctx.MessageSidFull ?? ctx.MessageSid;
     if (typeof id !== 'string' || !/^om_[\w-]+$/u.test(id)) return { status: 'invalid_source' };

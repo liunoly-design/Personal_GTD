@@ -53,6 +53,30 @@ test('无激活、未授权或错误入口在读取原消息前拦截，原消�
   assert.equal((await f.reminders.listItems()).length,0);assert.equal(f.calls,0);assert.equal(f.sent.length,0);
 });
 
+test('待澄清时未关联的时间回复提示选择原事项，不交给普通模型猜测',async t=>{
+  const f=fixture(t);
+  const text='小婕 GTD，提醒我明天交报价';
+  f.messages.set('om_1',message('om_1',text));
+  assert.equal((await f.capture.handle(context('om_1',text))).status,'collected_awaiting_time');
+  await f.restart();
+  const calls=f.calls;
+  f.messages.set('om_time',message('om_time','明天上午十点'));
+  const result=await f.capture.handle(context('om_time','明天上午十点'));
+  assert.equal(result.status,'needs_target');
+  assert.equal(result.delivery,'sent');
+  assert.equal(f.calls,calls);
+  assert.equal((await f.reminders.listItems()).length,1);
+  assert.match(f.sent.at(-1).text,/关联.*原请求/);
+});
+
+test('没有待澄清事项时的时间聊天不收集，也不发送 PGTD 回执',async t=>{
+  const f=fixture(t);
+  f.messages.set('om_time',message('om_time','明天上午十点'));
+  assert.equal((await f.capture.handle(context('om_time','明天上午十点'))).status,'not_handled');
+  assert.equal(f.calls,0);assert.equal(f.sent.length,0);
+  assert.equal((await f.reminders.listItems()).length,0);
+});
+
 test('直接回复机器人回执可澄清时间，跨重启和再次追问仍定位原事项',async t=>{
   const f=fixture(t);
   const text='小婕 GTD，提醒我明天交报价';
