@@ -45,7 +45,7 @@ try {
       || !latest.plaintext.includes('#O1 F104合成目标：稳定练习') || latest.plaintext.includes('保持练习')
       || !log.plaintext.includes('保持练习') || !log.plaintext.includes('合成初始记录')) throw new Error('READBACK_FAILED');
     console.log(JSON.stringify({ status: 'verified', mode: 'real-apple-two-notes-scripted-guidance', sameLatestNote: true,
-      historyPreserved: true, tagsPreserved: true, duplicateSuppressed: true, modelCalls: 0, durationMs: Math.round(performance.now() - started) }));
+      historyPreserved: true, tagTextPreserved: true, duplicateSuppressed: true, modelCalls: 0, durationMs: Math.round(performance.now() - started) }));
   }
 } catch (error) { console.error(JSON.stringify({ status: 'stopped', code: /^[A-Z_]+$/u.test(error.message) ? error.message : 'VERIFICATION_FAILED' })); process.exitCode = 1; }
 finally { await session?.close(); }

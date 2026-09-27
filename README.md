@@ -250,3 +250,13 @@ npm run demo:okr-finalize
 ```
 
 真实模型样例、合成日志和新增合成最新稿的创建、修订、读回验证均已执行。配置、可选真实验证命令、预算及未测项见 [F104 使用与验收](docs/deployment/okr-finalize.md)。仍未部署到正在使用的飞书网关。
+
+## 备忘录原生标签修复
+
+F103/F104 现已通过本机原生编辑器创建并读回 #O1/#KR1 等标签；追加、定稿更新保留标签，已有 #OK1 也已实测保留。此前的标签文本检查不等于原生标签验收。
+
+```bash
+npm run verify:notes-tags -- --write-synthetic
+```
+
+复用已授权的两篇合成笔记。依赖登录桌面、Swift 和辅助功能权限，运行时需避免同时编辑 Notes；尚未部署到飞书。详见[原生标签验收及恢复](docs/deployment/notes-native-tags.md)。

@@ -39,9 +39,11 @@ function run() {
       var candidates = folder.notes.whose({ name: input.title })();
       if (candidates.length > 10) fail('CAPACITY_EXCEEDED');
       value = candidates.map(snapshot).filter(function(n) { return n.plaintext.indexOf(input.marker) >= 0; });
-    } else if (input.command === 'read' || input.command === 'append' || input.command === 'replace') {
+    } else if (input.command === 'read' || input.command === 'append' || input.command === 'replace' || input.command === 'show') {
       var note = unique(folder.notes.whose({ id: input.noteId })());
       var before = snapshot(note);
+      if (input.command === 'show') app.show(note);
+      if (['append', 'replace'].indexOf(input.command) >= 0 && before.plaintext.indexOf('\ufffc') >= 0) fail('UNSUPPORTED_NOTE');
       if (input.command === 'append') {
         if (before.body !== input.expectedBody) fail('CONFLICT');
         if ((before.body + input.addition).length > 32768) fail('CAPACITY_EXCEEDED');

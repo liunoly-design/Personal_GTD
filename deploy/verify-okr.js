@@ -33,7 +33,7 @@ try {
   if (result.noteId !== probe.noteId || note.plaintext.split('F103合成目标').length !== 2
     || note.plaintext.split('F103合成补充').length !== 2 || !note.plaintext.includes('合成初始记录') || !result.receipt.includes('#KR1 F103合成结果')) throw new Error('READBACK_FAILED');
   console.log(JSON.stringify({ status: 'verified', mode: 'real-apple-notes', sameNote: true, duplicateSuppressed: true,
-    tagsPreserved: true, originalPreserved: true, durationMs: Math.round(performance.now() - started), modelCalls: 0 }));
+    tagTextPreserved: true, originalPreserved: true, durationMs: Math.round(performance.now() - started), modelCalls: 0 }));
 } catch (error) {
   console.error(JSON.stringify({ status: 'stopped', code: /^[A-Z_]+$/.test(error.message) ? error.message : 'VERIFICATION_FAILED' }));
   process.exitCode = 1;

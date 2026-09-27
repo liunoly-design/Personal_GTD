@@ -36,5 +36,5 @@ try {
   const replay = await session.handle(confirmation);
   console.log(JSON.stringify({ mode: 'simulation', scriptedGuidance: true, beforeConfirm, afterConfirm: notes.length,
     finalized: finalized.status === 'okr_finalized', replaySameNote: replay.noteId === finalized.noteId,
-    historyPreserved: notes[0].plaintext.includes('用户确认定稿'), tagsPreserved: notes[1].plaintext.includes('#KR1'), paidCalls: 0 }));
+    historyPreserved: notes[0].plaintext.includes('用户确认定稿'), tagTextPreserved: notes[1].plaintext.includes('#KR1'), paidCalls: 0 }));
 } finally { await session.close(); rmSync(dir, { recursive: true, force: true }); }

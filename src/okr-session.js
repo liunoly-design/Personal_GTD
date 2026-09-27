@@ -77,7 +77,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     if (note.id !== state.noteId || typeof note.body !== 'string' || typeof note.plaintext !== 'string') throw new Error('READBACK_FAILED');
     const pending = store.get('pending');
     if (pending) {
-      if (!note.plaintext.includes(pending.marker) || !note.plaintext.includes(pending.text)
+      if (note.tagsComplete === false || !note.plaintext.includes(pending.marker) || !note.plaintext.includes(pending.text)
         || !note.plaintext.includes(pending.beforePlaintext)) throw new Error('UPDATE_RESULT_UNKNOWN');
       store.transaction(() => {
         store.set(pending.key, { fingerprint: pending.fingerprint, result: pending.result });
@@ -152,7 +152,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
       await call({ ...request('append'), noteId: state.noteId, expectedBody: note.body,
         addition });
       note = await call({ ...request('read'), noteId: state.noteId });
-      if (note.id !== state.noteId || !note.plaintext.includes(marker) || !note.plaintext.includes(entryText)
+      if (note.tagsComplete === false || note.id !== state.noteId || !note.plaintext.includes(marker) || !note.plaintext.includes(entryText)
         || !note.plaintext.includes(beforePlaintext)) throw new Error('READBACK_FAILED');
       store.transaction(() => { finish(result); if (discussion) store.set('discussion:' + sessionKey, discussion); store.set('draft', draft); store.set('pending', null); });
       return result;

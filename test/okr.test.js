@@ -312,3 +312,36 @@ test('模型缓存不能把随后人工编辑的最新稿当作已分析版本',
   await assert.rejects(f.session.handle(event('new','record','讨论修改')),/UPDATE_RESULT_UNKNOWN|CONFLICT/);
   assert.match(f.notes[1].plaintext,/人工新内容/);
 });
+
+test('正文成功但原生标签失败不能报保存成功，核对修复后恢复且不重复追加', async t => {
+  const f = fixture(t);
+  await f.session.handle(event('native-open', 'open'));
+  let complete = false, writes = 0;
+  await f.restart({ bridge: async r => {
+    if (r.command === 'append') writes++;
+    const result = await f.bridge(r);
+    return r.command === 'read' ? { ...result, tagsComplete: complete } : result;
+  } });
+  const input = event('native-record', 'record', '#O1 合成目标');
+  await assert.rejects(f.session.handle(input), /READBACK_FAILED/);
+  await assert.rejects(f.session.handle(input), /UPDATE_RESULT_UNKNOWN/);
+  complete = true;
+  assert.equal((await f.session.handle(input)).status, 'okr_saved');
+  assert.equal(writes, 1);
+});
+
+test('最新稿原生标签未完成时保留定稿恢复状态，不重复创建第二篇笔记', async t => {
+  const f = fixture(t, { guide: stagedGuide() });
+  const draft = await readyDraft(f);
+  let complete = false;
+  await f.restart({ bridge: async r => {
+    const value = await f.bridge(r);
+    return r.command === 'read' && value.id === 'n2' ? { ...value, tagsComplete: complete } : value;
+  } });
+  const confirm = { ...event('native-confirm', 'confirm'), confirmVersion: draft.draftVersion };
+  await assert.rejects(f.session.handle(confirm), /UPDATE_RESULT_UNKNOWN/);
+  assert.equal(f.notes.length, 2);
+  complete = true;
+  assert.equal((await f.session.handle(confirm)).status, 'okr_finalized');
+  assert.equal(f.notes.length, 2);
+});
