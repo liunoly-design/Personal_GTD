@@ -1,0 +1,24 @@
+# Local configuration and private runtime data
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials/
+secrets/
+data/
+runtime/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+# Build and dependency artifacts
+node_modules/
+dist/
+coverage/
+.venv/
+__pycache__/
+*.pyc
+# .agents/skills, skills-lock.json and .scratch are intentionally tracked.
