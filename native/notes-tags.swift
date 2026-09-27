@@ -87,8 +87,9 @@ func htmlText(_ s:String) throws -> String {
 func run() throws -> [String:Any] {
     let data=FileHandle.standardInput.readDataToEndOfFile()
     guard let input=try JSONSerialization.jsonObject(with:data) as? [String:Any],
-          let expectedRaw=input["rawPlaintext"] as? String,let command=input["command"] as? String,
-          AXIsProcessTrusted(),let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Notes").first else {try fail("PERMISSION_DENIED")}
+          let expectedRaw=input["rawPlaintext"] as? String,let command=input["command"] as? String else {try fail("INVALID_INPUT")}
+    guard AXIsProcessTrusted() else {try fail("ACCESSIBILITY_DENIED")}
+    guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Notes").first else {try fail("EDITOR_UNAVAILABLE")}
     let root=AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(root,1)
     guard let w=(get(root,kAXWindowsAttribute) as? [AXUIElement])?.first,let e=editor(w) else {try fail("EDITOR_UNAVAILABLE")}

@@ -18,3 +18,5 @@ State: in-progress
 等待真实用户发送“讨论”。原测试预算44/45，扩大到55次的请求待回复；目前保持原值。此任务保持 in-progress，尚未完成真实闭环。
 
 `openclaw channels status --probe --json`：Feishu configured=true、running=true、probe.ok=true。配置/文档变更执行 `git diff --check` 通过；没有新增业务代码，未重复消耗真实模型额度。顺序审查确认仅启用合成绑定，临时代码已恢复，真实端到端保持未勾选。
+
+真实启动请求已接管并发送错误回执。系统日志确认网关 node 缺少辅助功能权限，详见 [权限修复](02-permission.md)。Notes 成功读回验收仍未完成；已打开系统设置并请求用户启用正确的 node。

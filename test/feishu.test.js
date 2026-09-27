@@ -258,3 +258,16 @@ test('飞书显式确认必须回复当前草案，定稿不会创建 Inbox 事�
   assert.equal(result.status,'okr_finalized');assert.equal(notes.length,2);
   assert.equal((await f.reminders.listItems()).length,0);assert.equal(f.calls,0);
 });
+
+test('OKR 辅助功能权限失败给出网关权限指引，不误报 Notes 自动化权限', async t => {
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } },
+    notesBridge: async () => { throw new Error('ACCESSIBILITY_DENIED'); } });
+  const text = '小婕 GTD okr 讨论';
+  f.messages.set('om_ax', message('om_ax', text));
+  const result = await f.capture.handle(context('om_ax', text));
+  assert.equal(result.code, 'ACCESSIBILITY_DENIED');
+  assert.match(result.receipt, /网关.*node.*辅助功能/);
+  assert.doesNotMatch(result.receipt, /检查备忘录访问权限/);
+  assert.equal(f.calls, 0);
+  assert.equal((await f.reminders.listItems()).length, 0);
+});

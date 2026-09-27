@@ -142,10 +142,11 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
         }
         catch (error) {
           const code = ['INVALID_INPUT', 'CONFLICT', 'CAPACITY_EXCEEDED', 'BUDGET_EXHAUSTED', 'CREATE_RESULT_UNKNOWN',
-            'UPDATE_RESULT_UNKNOWN', 'RECOVERY_REQUIRED', 'READBACK_FAILED', 'PERMISSION_DENIED', 'LOCATION_NOT_UNIQUE'].includes(error.message)
+            'UPDATE_RESULT_UNKNOWN', 'RECOVERY_REQUIRED', 'READBACK_FAILED', 'PERMISSION_DENIED', 'ACCESSIBILITY_DENIED', 'LOCATION_NOT_UNIQUE'].includes(error.message)
             ? error.message : 'NOTES_UNAVAILABLE';
           const explanation = code === 'INVALID_INPUT' ? '请使用不超过 4000 字的非空文字。'
-            : code === 'PERMISSION_DENIED' ? '请检查备忘录访问权限。'
+            : code === 'ACCESSIBILITY_DENIED' ? '网关运行程序（node）的辅助功能权限未开启，请在 macOS“隐私与安全性 → 辅助功能”中开启后再试。'
+            : code === 'PERMISSION_DENIED' ? '请检查网关运行程序控制备忘录的自动化权限。'
             : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
             : '请保留原消息，核对备忘录后再继续。';
           result = { status: 'okr_error', code, receipt: `OKR 记录未确认完成。${explanation}` };
