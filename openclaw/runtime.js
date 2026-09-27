@@ -6,7 +6,7 @@ import { openClawGoogleKey } from '../src/openclaw-auth.js';
 import { createFeishuClient } from '../src/feishu-http.js';
 import { openFeishuCapture } from '../src/feishu-capture.js';
 
-export async function openRuntime({ config, hostConfig }) {
+export async function openRuntime({ config, hostConfig, googleKey = openClawGoogleKey }) {
   if (!isAbsolute(config.runtimeConfigPath) || !isAbsolute(config.stateDir)) throw new Error('Absolute private paths required');
   const runtime = JSON.parse(await readFile(config.runtimeConfigPath, 'utf8'));
   if (!isAbsolute(runtime.usagePath ?? '') || !Number.isFinite(runtime.model?.maxBudgetUsd) || !Number.isSafeInteger(runtime.model?.maxCalls)) {
@@ -19,8 +19,18 @@ export async function openRuntime({ config, hostConfig }) {
   const feishu = createFeishuClient({ credentials: () => ({ appId: account.appId, appSecret: account.appSecret }) });
   let model, reminders, capture;
   try {
+    const apiKey = googleKey({ agentId: runtime.authAgent ?? 'gtd', ...(runtime.openclawPackageDir ? { packageDir: runtime.openclawPackageDir } : {}) });
+    // The host SDK's cold import can block the event loop beyond the task's
+    // analysis deadline. Prepare credentials before starting that deadline.
+    let preparationTimer;
+    try {
+      await Promise.race([Promise.resolve().then(apiKey), new Promise((_, reject) => {
+        preparationTimer = setTimeout(() => reject(new Error('Credential preparation timeout')), 30000);
+      })]);
+    } catch { /* Preserve explicit collection's analysis-failure fallback. */ }
+    finally { clearTimeout(preparationTimer); }
     model = openGeminiAnalyzer({ statePath: runtime.usagePath, config: runtime.model,
-      apiKey: openClawGoogleKey({ agentId: runtime.authAgent ?? 'gtd', ...(runtime.openclawPackageDir ? { packageDir: runtime.openclawPackageDir } : {}) }) });
+      apiKey });
     reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
       reminders, feishu, analyze: model.analyze });
