@@ -9,6 +9,7 @@
 - [工作流与Review](docs/requirements/工作流与Review.md)：日常行动与周期回顾。
 - [待确认问题](docs/requirements/待确认问题.md)：后续讨论入口。
 - [功能版本计划](docs/requirements/功能版本计划.md)：OKR 备忘录独立模块、标签关联、Inbox 整理和新建日历事件的开发顺序（尚未实现）。
+- [功能实现清单](docs/requirements/功能实现清单.md)：全部功能的稳定 F 编号、V0–V5 规划分组、状态与 skill 开发流程；可按编号讨论和开发。
 - [参考项目](docs/requirements/参考项目.md)：历史资料包中的相关参考。
 
 总体讨论位于上级 Personal OS 项目；共享约定见 [跨项目协议快照](docs/context/跨项目协议快照.md)。原 demo 命令保持模拟；start:apple / start:model 会使用对应真实服务。
