@@ -105,7 +105,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const message = await feishu.getMessage(id, options());
     if (!message || message.message_id !== id || message.chat_id !== ctx.NativeChannelId
       || message.sender?.id !== ctx.SenderId || message.sender.id_type !== 'open_id'
-      || message.sender.sender_type !== 'user' || message.updated || message.deleted
+      || message.sender.sender_type !== 'user' || message.deleted
       || !Number.isSafeInteger(Number(message.create_time)) || Number(message.create_time) <= 0
       || Number(message.create_time) > 8640000000000000) return { status: 'invalid_source' };
     const event = { id, senderId: message.sender.id, conversationId: message.chat_id, type: message.msg_type,
@@ -120,8 +120,19 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const linkedOkr = !prefix && parent?.route === 'okr' && parent.senderId === event.senderId
       && parent.conversationId === event.conversationId;
     const isOkr = explicitOkr || linkedOkr;
+    if (message.updated) {
+      // A provider update flag does not prove that the delivered text changed.
+      // Only conversational OKR replies may proceed after exact content checks.
+      const ordinaryReply = linkedOkr && !['确认定稿', '暂停'].includes(event.text.trim());
+      if (!ordinaryReply) return { status: 'invalid_source' };
+      const previousSource = store.get('source:' + id);
+      if (event.text !== (ctx.rawText ?? ctx.RawBody)
+        || (previousSource && previousSource.textHash !== hash(event.text))) {
+        return deliverResult(event, { status: 'source_changed', receipt: '这条回复的正文已发生变化，本次未处理。请将希望讨论的完整内容作为新消息回复原 OKR 对话。' });
+      }
+    }
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
-      rootId: prefix ? id : event.replyTo ?? id, ...(isOkr ? { route: 'okr' } : {}) });
+      rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), ...(isOkr ? { route: 'okr' } : {}) });
     let result;
     if (isOkr) {
       const instruction = explicitOkr ? command.slice(3).replace(/^[\s，,:：]+/u, '') : '';
@@ -154,10 +165,13 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       }
     } else result = await capture.handle(event);
     if (result.draftVersion) store.set('source:' + id, { ...store.get('source:' + id), draftVersion: result.draftVersion });
+    return deliverResult(event, result);
+  }
+  async function deliverResult(event, result) {
     if (result.receipt && !result.delivery) {
       try {
-        await receipts.send({ conversationId: event.conversationId, replyTo: id, text: result.receipt },
-          hash([config.accountId, id, result.status, result.receipt]));
+        await receipts.send({ conversationId: event.conversationId, replyTo: event.id, text: result.receipt },
+          hash([config.accountId, event.id, result.status, result.receipt]));
         result.delivery = 'sent';
       } catch { result.delivery = 'pending'; }
     }

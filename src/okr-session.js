@@ -117,6 +117,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
           try {
             const value = await Promise.race([
               Promise.resolve().then(() => guide({ stage: current.stage, workingDraft: current.workingDraft ?? null, answer: event.text,
+                discussionSummary: current.summary ?? null, lastQuestion: current.lastQuestion ?? null, sentAt: event.sentAt,
                 currentGoals: latest?.plaintext.slice(0, 8000) ?? '', goalsTruncated: (latest?.plaintext.length ?? 0) > 8000,
                 recentLog: note.plaintext.slice(-3000), logTruncated: note.plaintext.length > 3000,
                 signal: controller.signal })),
@@ -135,7 +136,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
         }
         if (!analysis && !guidanceFailure) guidanceFailure = oldAnalysis?.reason ?? 'MODEL_INTERRUPTED';
         if (analysis) {
-          discussion = { stage: analysis.stage, workingDraft: analysis.draft ?? store.get('discussion:' + sessionKey)?.workingDraft ?? null };
+          discussion = { stage: analysis.stage, summary: analysis.summary, lastQuestion: analysis.questions[0] ?? null, workingDraft: analysis.draft ?? store.get('discussion:' + sessionKey)?.workingDraft ?? null };
           if (analysis.stage === 'ready') draft = { version: randomUUID(), text: analysis.draft, owner: sessionKey, latestBody: latest?.body ?? null };
         }
       }
@@ -168,7 +169,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     const resume = progress?.workingDraft ? '\n当前工作草案（待确认）：\n' + progress.workingDraft : '';
     const current = latest ? '\n当前目标：\n' + clean(latest.plaintext).slice(0, 3000) + (latest.plaintext.length > 3000 ? '\n（当前目标预览截断，完整内容在最新稿）' : '') : '';
     return finish({ status: 'okr_open', noteId: note.id,
-      receipt: `已进入 OKR 逐项讨论（grilling 模式）。先明确周期和个人情况，再讨论一个 O，并逐个讨论其 3–5 个 KR。每轮一个核心问题，回答后保存并继续。\n${progress?.workingDraft ? "请先核对下方工作草案，说明当前这一项需要补充或修改什么。" : "这次要制定或回顾哪个年度/季度？起止日期是什么？"}${resume}${current}\n最近日志：\n${preview.length > 3000 ? '（仅显示末尾 3000 字符，完整内容在备忘录）\n' : ''}${preview.slice(-3000)}` });
+      receipt: `已进入 OKR 逐项讨论（grilling 模式）。先明确周期和个人情况，再讨论一个 O，并逐个讨论其 3–5 个 KR。每轮一个核心问题，回答后保存并继续。\n${progress?.lastQuestion ? "继续上一轮问题：" + progress.lastQuestion : progress?.workingDraft ? "请先核对下方工作草案，说明当前这一项需要补充或修改什么。" : "这次要制定或回顾哪个年度/季度？起止日期是什么？"}${resume}${current}\n最近日志：\n${preview.length > 3000 ? '（仅显示末尾 3000 字符，完整内容在备忘录）\n' : ''}${preview.slice(-3000)}` });
   }
   return {
     handle(event) {

@@ -270,3 +270,57 @@ test('OKR 辅助功能权限失败给出网关权限指引，不误报 Notes 自
   assert.equal(f.calls, 0);
   assert.equal((await f.reminders.listItems()).length, 0);
 });
+
+test('OKR回复原回执可持续质询，updated但正文一致的普通回复不被误拒绝', async t => {
+  const notes = []; let turns = 0;
+  const notesBridge = async r => {
+    if (r.command === 'bind') return { accountId: 'a', folderId: 'f' };
+    if (r.command === 'create') { notes.push({ id: 'note1', body: r.body, plaintext: r.body }); return { ...notes[0] }; }
+    const n = notes[0];
+    if (r.command === 'append') { assert.equal(r.expectedBody, n.body); n.body += r.addition; n.plaintext = n.body.replaceAll('<br>', '\n'); }
+    return { ...n };
+  };
+  const okrGuide = async () => { turns++; return { stage: 'direction', summary: '当前目标仍在澄清。', advice: '先核实需求证据，再选择方案。', questions: ['这一判断有什么实际证据？'], draft: null }; };
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge, okrGuide });
+  const start = '小婕 gtd okr 讨论';
+  f.messages.set('om_start', message('om_start', start));
+  await f.capture.handle(context('om_start', start));
+  const parent = f.sent[0].message_id;
+  for (let i = 0; i < 15; i++) {
+    if (i === 7) await f.restart();
+    const id = 'om_continue_' + i, text = '合成讨论依据' + i;
+    f.messages.set(id, message(id, text, { parent_id: parent, updated: true }));
+    const input = { ...context(id, text), ReplyToId: parent };
+    assert.equal((await f.capture.handle(input)).status, 'okr_guided');
+    assert.equal((await f.capture.handle(input)).status, 'okr_guided');
+  }
+  assert.equal(turns, 15);
+  assert.equal(notes.length, 1);
+  assert.equal((await f.reminders.listItems()).length, 0);
+});
+
+test('OKR更新回复正文不一致或同ID改文时提示重发，不能重新执行', async t => {
+  const note = { id: 'n', body: '', plaintext: '' }; let writes = 0;
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: async r => {
+    if (r.command === 'bind') return { accountId: 'a', folderId: 'f' };
+    if (r.command === 'create') note.body = note.plaintext = r.body;
+    if (r.command === 'append') { writes++; note.body += r.addition; note.plaintext = note.body.replaceAll('<br>', '\n'); }
+    return { ...note };
+  } });
+  const start = '小婕 gtd okr 讨论';
+  f.messages.set('om_start', message('om_start', start));
+  await f.capture.handle(context('om_start', start));
+  const parent = f.sent[0].message_id;
+  const input = text => ({ ...context('om_edit', text), ReplyToId: parent });
+  f.messages.set('om_edit', message('om_edit', '新内容', { parent_id: parent, updated: true }));
+  assert.equal((await f.capture.handle(input('旧内容'))).status, 'source_changed');
+  assert.match(f.sent.at(-1).text, /新消息回复原 OKR/);
+  assert.equal(writes, 0);
+  assert.equal((await f.capture.handle(input('新内容'))).status, 'okr_saved');
+  await f.restart();
+  f.messages.set('om_edit', message('om_edit', '再次修改', { parent_id: parent, updated: true }));
+  assert.equal((await f.capture.handle(input('再次修改'))).status, 'source_changed');
+  assert.equal(writes, 1);
+  f.messages.set('om_confirm_edit', message('om_confirm_edit', '确认定稿', { parent_id: parent, updated: true }));
+  assert.equal((await f.capture.handle({ ...context('om_confirm_edit', '确认定稿'), ReplyToId: parent })).status, 'invalid_source');
+});

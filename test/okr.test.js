@@ -398,3 +398,16 @@ test('每轮只推进一个O或KR，重启后把工作草案传回模型', async
   assert.match(opened.receipt, /当前工作草案/);
   assert.match(opened.receipt, /改善体力/);
 });
+
+test('草案尚未形成时重启仍保留已澄清事实和当前问题，不重新追问周期', async t => {
+  let received;
+  const f = fixture(t, { guide: async input => { received = input; return { stage: 'direction', summary: '合成事实：周期已确认，旧目标为测试内容；当前仅讨论产品方向。', advice: '先验证客户需要。', questions: ['哪类客户问题已获得实际付费证据？'], draft: null }; } });
+  await f.session.handle(event('start', 'open'));
+  await f.session.handle(event('first', 'record', '合成背景'));
+  await f.restart();
+  const opened = await f.session.handle(event('resume', 'open'));
+  assert.match(opened.receipt, /继续上一轮问题：哪类客户问题已获得实际付费证据/);
+  await f.session.handle(event('second', 'record', '补充合成证据'));
+  assert.match(received.discussionSummary, /旧目标为测试内容/);
+  assert.equal(received.lastQuestion, '哪类客户问题已获得实际付费证据？');
+});

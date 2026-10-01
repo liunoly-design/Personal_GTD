@@ -272,3 +272,7 @@ npm run verify:notes-tags -- --write-synthetic
 草案使用一级周期、二级 O、三级 KR 标题，备忘录应用原生“标题／小标题／副标题”，并保留原生 #O1、#KR1 标签。反向审视后回复完整草案“确认定稿”才更新最新稿。
 
 验证范围和限制见[逐项讨论验收](docs/deployment/okr-guided-structure.md)。
+
+### OKR 持续回复修复（2026-10-01）
+
+可持续回复原 OKR 回执，围绕同一个目标反复质询；未形成草案也保存当前事实与问题，重启后续接。修复飞书 `updated` 标记误拒绝正文一致的普通讨论回复；正文不一致会给出明确重发提示。仍受已授权调用预算和笔记容量限制。见[原因、验证与恢复](docs/deployment/okr-continuation.md)。
