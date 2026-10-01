@@ -276,3 +276,9 @@ npm run verify:notes-tags -- --write-synthetic
 ### OKR 持续回复修复（2026-10-01）
 
 可持续回复原 OKR 回执，围绕同一个目标反复质询；未形成草案也保存当前事实与问题，重启后续接。修复飞书 `updated` 标记误拒绝正文一致的普通讨论回复；正文不一致会给出明确重发提示。仍受已授权调用预算和笔记容量限制。见[原因、验证与恢复](docs/deployment/okr-continuation.md)。
+
+### OKR+GTD 教练方法
+
+已将 grilling 的依赖问题访谈、okr-design 的结果指标方法和 okr-creator 的验收思想接入同一位 OKR 教练。运行模型与个人OKR技能共用 `src/okr-method.md`：逐项质询，未知数据保留未知，承诺底线单独判断，GTD行动作为候选且不替代KR证据。
+
+[来源比较与采用边界](docs/requirements/OKR技能比较与整合.md)；[验证记录](docs/deployment/okr-method-integration.md)。可用 `npm run evaluate:okr-method -- --allow-model`执行两个真实模型合成样例（消耗已配置共享预算，不访问Apple或发送飞书）。

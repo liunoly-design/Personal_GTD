@@ -88,3 +88,7 @@ npx skills@1.7.0 list -a codex
 - [skills CLI](https://github.com/vercel-labs/skills)：项目安装、目标 agent 和锁文件。
 - [AIHero](https://www.aihero.dev/skills)：工作流程说明；以本次安装源码为准。
 - [AGENTS.md 官方说明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)：项目指令文件。
+
+## OKR方法整合（2026-10-01）
+
+用户指定的三技能已读取并对比，选择grilling访谈、okr-design方法主干及okr-creator验收思想。没有额外安装上游整套执行/调度流程；本地个人OKR技能与生产模型共用 `src/okr-method.md`。固定版本、采用边界及原因见[比较记录](../requirements/OKR技能比较与整合.md)。

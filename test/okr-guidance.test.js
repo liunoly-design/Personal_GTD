@@ -2,7 +2,7 @@ import { sampleDraft } from '../examples/okr-sample.js';
 import { validateGuidance } from '../src/okr-guidance.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openGeminiAnalyzer } from '../src/gemini.js';
@@ -13,6 +13,8 @@ test('OKR 模型单轮返回结构化建议，共用预算账本且没有工具�
   const model=openGeminiAnalyzer({statePath:join(dir,'usage.sqlite'),apiKey:async()=> 'synthetic',config:{maxBudgetUsd:1},fetchImpl:async(_url,options)=>{
     const body=JSON.parse(options.body);assert.equal(body.tools,undefined);
     assert.match(body.systemInstruction.parts[0].text,/反向审视/);
+    assert.ok(body.systemInstruction.parts[0].text.includes(readFileSync(new URL('../src/okr-method.md', import.meta.url), 'utf8')));
+    assert.ok(Buffer.byteLength(options.body) <= 30000);
     assert.equal(body.generationConfig.maxOutputTokens,4096);
     return new Response(JSON.stringify({modelVersion:'gemini-3.8-flash',usageMetadata:{promptTokenCount:200,candidatesTokenCount:80},
       candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]}));
