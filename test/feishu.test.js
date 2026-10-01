@@ -568,3 +568,25 @@ test('不可用回执恢复也采用当前权限，不向已移出白名单的�
   assert.equal((await f.capture.recover()).at(-1).status, 'forbidden');
   assert.equal(f.sent.length, 1);
 });
+
+test('OKR 模型一次改动多项时说明原因和下一步，保留原回答而不推进草案', async t => {
+  const { sampleDraft } = await import('../examples/okr-sample.js');
+  const n = syntheticNotes();
+  let guideCalls = 0;
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge,
+    okrGuide: async () => { guideCalls++; return { stage: 'direction', summary: '合成用户提出多项运动候选。',
+      advice: '合成建议。', questions: ['合成问题？'], draft: sampleDraft }; } });
+  await dispatch(f, 'om_multi_open', '小婕 okr 讨论');
+  const text = '合成回答：减重、游泳、每周运动和饮食控制';
+  const parent = f.sent.at(-1).message_id;
+  const result = await dispatch(f, 'om_multi_answer', text, parent);
+  assert.equal(result.status, 'okr_guidance_failed');
+  assert.equal(result.guidanceFailure, 'MULTIPLE_OKR_ITEMS');
+  assert.match(result.receipt, /模型.*多项/);
+  assert.match(result.receipt, /只.*一项/);
+  assert.match(result.receipt, /未.*草案/);
+  assert.match(n.notes[0].body, /合成回答：减重、游泳、每周运动和饮食控制/);
+  assert.doesNotMatch(n.notes[0].body, /## #O1/);
+  await dispatch(f, 'om_multi_answer', text, parent);
+  assert.equal(guideCalls, 1);
+});

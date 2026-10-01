@@ -145,10 +145,13 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
           if (analysis.stage === 'ready') draft = { version: randomUUID(), text: analysis.draft, owner: sessionKey, latestBody: latest?.body ?? null };
         }
       }
-      const entryText = guide ? event.text + '\n' + (analysis ? guidanceText(analysis) : '本轮分析未完成，原回答已记录，阶段未推进。') : event.text;
+      const failureText = guidanceFailure === 'MULTIPLE_OKR_ITEMS'
+        ? '已保存原回答。模型本轮试图同时改动多项目标或关键结果，未更新草案或推进讨论。你可以一次提供多个想法；我们接下来只讨论一项。请回复新消息，明确“先只讨论当前目标的某一个 KR”，并说明你希望先完善哪一项。'
+        : '已保存原回答，本轮分析未完成。可稍后用新消息继续；同一消息不会重复调用模型。';
+      const entryText = guide ? event.text + '\n' + (analysis ? guidanceText(analysis) : failureText) : event.text;
       const result = { status: guide ? analysis ? 'okr_guided' : 'okr_guidance_failed' : 'okr_saved', noteId: note.id, receipt: '已保存到 OKR 日志。回复此消息可继续记录；启动 OKR 讨论可回看。' };
       if (guidanceFailure) result.guidanceFailure = guidanceFailure;
-      if (guide) result.receipt = analysis ? '已记录。\n' + guidanceText(analysis) : '已保存原回答，本轮分析未完成。可稍后用新消息继续；同一消息不会重复调用模型。';
+      if (guide) result.receipt = analysis ? '已记录。\n' + guidanceText(analysis) : failureText;
       if (draft) {
         result.draftVersion = draft.version;
         result.receipt += '\n请核对以上完整草案，回复此消息“确认定稿”后更新最新完整稿；也可回复修改意见。';
