@@ -41,3 +41,14 @@ export function guidanceText(value) {
   const names = { background: '背景', direction: '方向与策略', okr: '目标与关键结果', challenge: '反向审视', ready: '待确认' };
   return `# OKR 讨论 · ${names[value.stage]}\n## 已知事实与待确认\n${value.summary}\n## 建议与质询\n${value.advice}\n${value.questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}${value.draft ? '\n## 工作草案（待确认）\n' + value.draft : ''}`;
 }
+
+export const okrChangeInstructions = `已有workingDraft时，本轮输出约定改为单项change，由代码保留原周期和其他条目并组装完整稿，覆盖上面“输出完整draft”的规则。
+本轮JSON只有stage、summary、advice、questions、change，不输出draft字段；change为null表示只讨论/提问，不改草案。需要修改时change是一个对象，不能是数组或多个操作：operation为upsert或delete，id为唯一的#O或#KR标记，parentId为KR所属的已有O标记（O为null），text为这一个条目的完整Markdown标题及正文（删除时null）。不要包含周期标题、其他O/KR标题，也不要复述整稿。
+upsert可修改已有条目或新增一个条目。已有KR不能换所属O，新增KR只能放在已存在的O下；前一个O不足三个KR不能新增下一个O。不能删除含KR的O或最后一个O。未明确要修改时change=null；先提一个问题也应change=null。判断challenge/ready完整性时以workingDraft应用这一项后为准；确认定稿仍由用户关联当前草案完成。`;
+export const okrChangeSchema = { ...okrSchema, required: [...okrSchema.required.filter(k => k !== 'draft'), 'change'], properties: {
+  ...Object.fromEntries(Object.entries(okrSchema.properties).filter(([k]) => k !== 'draft')), change: { type: ['object', 'null'], additionalProperties: false,
+    required: ['operation', 'id', 'parentId', 'text'], properties: {
+      operation: { type: 'string', enum: ['upsert', 'delete'] }, id: { type: 'string', pattern: '^#(O|KR)[1-9][0-9]*$' },
+      parentId: { type: ['string', 'null'], pattern: '^#O[1-9][0-9]*$' }, text: { type: ['string', 'null'] },
+    } },
+} };

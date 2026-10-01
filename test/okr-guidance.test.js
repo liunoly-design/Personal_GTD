@@ -31,3 +31,22 @@ test('模型草案的误转义换行修正为可读分行，超量问题和无�
   assert.throws(()=>validateGuidance({...base,questions:['a','b','c','d']}),/INVALID_GUIDANCE/);
   assert.throws(()=>validateGuidance({...base,draft:'没有标签的草案'}),/INVALID_GUIDANCE/);
 });
+
+test('已有草案的模型只返回单项KR变更，由代码保留O原文并组装完整草案', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pgtd-okr-change-'));
+  const before = '# 2026 第四季度（2026-10-01 至 2026-12-31）\n## #O1 合成学习目标\n策略：每周练习两小时。';
+  const model = openGeminiAnalyzer({ statePath: join(dir, 'usage.sqlite'), apiKey: async () => 'synthetic', config: { maxBudgetUsd: 1 },
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.ok(body.generationConfig.responseJsonSchema.required.includes('change'));
+      assert.equal(body.generationConfig.responseJsonSchema.properties.draft, undefined);
+      const value = { stage: 'okr', summary: '当前合成学习目标已明确。', advice: '建议只完善第一个KR。', questions: ['独立完成的验收标准是什么？'],
+        change: { operation: 'upsert', id: '#KR1', parentId: '#O1', text: '### #KR1 独立完成合成练习\n验收标准：待确认。' } };
+      return new Response(JSON.stringify({ modelVersion: 'gemini-3.8-flash', usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 80 },
+        candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(value) }] } }] }));
+    } });
+  t.after(async () => { await model.close(); rmSync(dir, { recursive: true, force: true }); });
+  const result = await model.discussOkr({ stage: 'okr', workingDraft: before, answer: '我想完善第一个KR' });
+  assert.equal(result.draft, '# 2026 第四季度（2026-10-01 至 2026-12-31）\n## #O1 合成学习目标\n策略：每周练习两小时。\n### #KR1 独立完成合成练习\n验收标准：待确认。');
+  assert.equal(model.usage().calls, 1);
+});

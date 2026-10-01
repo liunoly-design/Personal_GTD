@@ -1,4 +1,5 @@
-import { okrInstructions, okrSchema, validateGuidance } from './okr-guidance.js';
+import { applyOkrChange } from './okr-structure.js';
+import { okrInstructions, okrSchema, validateGuidance, okrChangeInstructions, okrChangeSchema } from './okr-guidance.js';
 import { randomUUID } from 'node:crypto';
 import { openOperationStore } from './operation-store.js';
 
@@ -44,11 +45,12 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
     const {signal, ...input} = args;
     signal?.throwIfAborted();
     const isOkr = task === 'okr';
+    const useChange = isOkr && Boolean(input.workingDraft);
     const maxOutputTokens = isOkr ? config.maxOkrOutputTokens : config.maxOutputTokens;
-    const body = JSON.stringify({ systemInstruction:{parts:[{text:isOkr ? okrInstructions : instructions}]}, contents:[{role:'user',parts:[{text:JSON.stringify(input)}]}],
+    const body = JSON.stringify({ systemInstruction:{parts:[{text:isOkr ? okrInstructions + (useChange ? "\n" + okrChangeInstructions : "") : instructions}]}, contents:[{role:'user',parts:[{text:JSON.stringify(input)}]}],
       generationConfig:{temperature:0,maxOutputTokens,
         thinkingConfig:config.model.startsWith('gemini-2.5-')?{thinkingBudget:0}:{thinkingLevel:'low'},
-        responseMimeType:'application/json',responseJsonSchema:isOkr ? okrSchema : schema} });
+        responseMimeType:'application/json',responseJsonSchema:isOkr ? (useChange ? okrChangeSchema : okrSchema) : schema} });
     const bytes = Buffer.byteLength(body);
     if (bytes > config.maxInputBytes) throw new Error('Model input capacity exceeded');
     const requestSignal = AbortSignal.any([AbortSignal.timeout(config.timeoutMs), ...(signal ? [signal] : [])]);
@@ -102,7 +104,10 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
       const text=candidate.content?.parts?.filter(part=>!part.thought).map(part=>part.text??'').join('');
       const value=JSON.parse(text);
       let guidance;
-      if (isOkr) guidance = validateGuidance(value);
+      if (isOkr) {
+        if (useChange && value.draft !== undefined) throw new Error('Invalid single-item response');
+        guidance = validateGuidance(useChange ? { ...value, draft: applyOkrChange(input.workingDraft, value.change) } : value);
+      }
       if (!isOkr && /^\d{2}:\d{2}:00$/u.test(value.reminder?.time ?? '')) value.reminder.time=value.reminder.time.slice(0,5);
       if (!isOkr && (!['collect','remind','discuss','uncertain'].includes(value.intent) || typeof value.title!=='string' || !value.title.trim()
         || [...value.title].length>80 || /[\r\n]/u.test(value.title) || typeof value.suggestion!=='string'

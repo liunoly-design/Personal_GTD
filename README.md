@@ -303,3 +303,5 @@ npm run demo:entries
 ```
 
 `demo:entries` 使用固定合成时钟、同一临时状态目录及两个独立进程，覆盖三个入口、旧 OKR 别名/回复、旧 GTD 无模块标签的链接确认、重投与恢复。最终为一篇合成笔记、两条模拟事项、十条模拟回执；路由模型调用、付费调用和真实写入均为零。CLI `npm start` 仍是 GTD 收集模拟，三个模块的公开入口验收使用上述可信飞书模拟。证据与未测项见 [F601/T01 任务记录](.scratch/f601-explicit-entries/issues/01-explicit-entries.md)；三个独立 Agent 与新版真实飞书/Apple/模型闭环尚未由本任务验收。2026-10-01 已按用户授权重启现有网关加载新版，连接与插件检查通过，见 [部署记录](docs/deployment/f601-explicit-entries-2026-10-01.md)。
+
+OKR 已有工作草案时，模型每轮只提供一项变更，由代码保留其他条目并组装完整稿；不再要求模型每次重写全稿。项末排版空行不算另一项改动，实质多项修改仍拒绝。旧失败消息不重新分析，续接请回复原回执发送新消息。真实模型质量仍需飞书逐项验收，见 [单项合同修复](.scratch/okr-single-item-contract/issues/01-single-item-contract.md)。

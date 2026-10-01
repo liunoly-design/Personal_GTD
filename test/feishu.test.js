@@ -590,3 +590,50 @@ test('OKR 模型一次改动多项时说明原因和下一步，保留原回答�
   await dispatch(f, 'om_multi_answer', text, parent);
   assert.equal(guideCalls, 1);
 });
+
+test('关联单项KR回答只因Markdown空行变化也能正常推进，真实多项修改仍拒绝', async t => {
+  const before = '# 2026 第四季度（2026-10-01 至 2026-12-31）\n## #O1 合成学习目标\n基线：未知，先核实。';
+  const n = syntheticNotes();
+  let turn = 0;
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge,
+    okrGuide: async () => ({ stage: ++turn === 1 ? 'direction' : 'okr', summary: '合成用户每周有两小时。',
+      advice: '建议先完善当前一项。', questions: ['当前这一项的衡量标准是什么？'],
+      draft: turn === 1 ? before : turn === 2 ? before + '\n\n### #KR1 独立完成合成练习\n验收标准：待确认。'
+        : before.replace('合成学习目标', '另一合成学习目标') + '\n\n### #KR1 修改合成练习结果\n验收标准：待确认。' }) });
+  await dispatch(f, 'om_layout_open', '小婕 okr 讨论');
+  await dispatch(f, 'om_layout_o', '合成目标回答', f.sent.at(-1).message_id);
+  const result = await dispatch(f, 'om_layout_kr', '我想完善当前目标的第一个KR', f.sent.at(-1).message_id);
+  assert.equal(result.status, 'okr_guided');
+  assert.match(result.receipt, /#KR1 独立完成合成练习/);
+  assert.doesNotMatch(result.receipt, /模型本轮试图同时改动多项/);
+  const rejected = await dispatch(f, 'om_layout_multi', '合成多项更改', f.sent.at(-1).message_id);
+  assert.equal(rejected.guidanceFailure, 'MULTIPLE_OKR_ITEMS');
+});
+
+test('真实模型适配器的单项输出经可信飞书入口推进KR，原O不由模型重写', async t => {
+  const { openGeminiAnalyzer } = await import('../src/gemini.js');
+  const dir = mkdtempSync(join(tmpdir(), 'pgtd-step-http-'));
+  const before = '# 2026 第四季度（2026-10-01 至 2026-12-31）\n## #O1 合成学习目标\n原O文字必须保持。';
+  let requests = 0;
+  const model = openGeminiAnalyzer({ statePath: join(dir, 'usage.sqlite'), apiKey: async () => 'synthetic', config: { maxBudgetUsd: 1 },
+    fetchImpl: async (_url, options) => {
+      const input = JSON.parse(JSON.parse(options.body).contents[0].parts[0].text);
+      requests++;
+      const value = input.workingDraft ? { stage: 'okr', summary: '合成目标已明确。', advice: '建议只完善一个KR。', questions: ['该结果如何验收？'],
+        change: { operation: 'upsert', id: '#KR1', parentId: '#O1', text: '### #KR1 合成可验收结果\n标准：待确认。' } }
+        : { stage: 'direction', summary: '合成目标已明确。', advice: '先确定O。', questions: ['当前O是否准确？'], draft: before };
+      return new Response(JSON.stringify({ modelVersion: 'gemini-3.8-flash', usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 80 },
+        candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(value) }] } }] }));
+    } });
+  t.after(async () => { await model.close(); rmSync(dir, { recursive: true, force: true }); });
+  const n = syntheticNotes();
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge, okrGuide: model.discussOkr });
+  await dispatch(f, 'om_http_step_open', '小婕 okr 讨论');
+  await dispatch(f, 'om_http_step_o', '合成O回答', f.sent.at(-1).message_id);
+  const parent = f.sent.at(-1).message_id;
+  const result = await dispatch(f, 'om_http_step_kr', '我想完善当前目标的KR', parent);
+  assert.equal(result.status, 'okr_guided');
+  assert.match(result.receipt, /原O文字必须保持。\n### #KR1 合成可验收结果/);
+  assert.equal((await dispatch(f, 'om_http_step_kr', '我想完善当前目标的KR', parent)).status, 'okr_guided');
+  assert.equal(requests, 2);
+});
