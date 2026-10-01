@@ -1,5 +1,5 @@
 import { openOkrSession } from './okr-session.js';
-import { activationLength } from './activation.js';
+import { explicitEntry, okrInstruction, validateEntryActivation, gtdGuard, legacyOkrInstruction } from './explicit-entries.js';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { openOperationStore } from './operation-store.js';
@@ -7,6 +7,7 @@ import { openDurableCapture } from './durable-capture.js';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function validateFeishuScope(config) {
+  validateEntryActivation(config.activation);
   for (const name of ['accountId', 'entryAgentId']) {
     if (typeof config[name] !== 'string' || !config[name].trim()) throw new Error('Explicit scope required');
   }
@@ -15,11 +16,10 @@ export function validateFeishuScope(config) {
       throw new Error('Explicit ID allowlist required');
     }
   }
-  if (config.activation !== undefined && (typeof config.activation !== 'string' || !config.activation.trim()
-    || config.activation !== config.activation.trim())) throw new Error('Invalid activation');
+
 }
 function activated(text, config) {
-  return activationLength(text, config.activation) > 0;
+  return Boolean(explicitEntry(text, config.activation));
 }
 // Only admits a candidate; the durable capture checks pending requests and
 // responds needs_target without guessing an item or calling the model.
@@ -111,12 +111,18 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const event = { id, senderId: message.sender.id, conversationId: message.chat_id, type: message.msg_type,
       text: message.msg_type === 'text' ? JSON.parse(message.body.content).text : '', sentAt: new Date(Number(message.create_time)).toISOString(),
       ...(message.parent_id ? { replyTo: message.parent_id } : {}) };
+    if ([...event.text].length > (config.maxInputChars ?? 8000)
+      || JSON.stringify(event).length > (config.maxEventChars ?? 20000)) {
+      return deliverResult(event, { status: 'input_too_large', receipt: '内容超过本地容量，请拆分后发送；未保存或截断原文。' });
+    }
     const parentReceipt = store.get('reply:' + message.parent_id);
     const parent = parentReceipt ?? store.get('source:' + message.parent_id);
     if (parent?.senderId === event.senderId && parent.conversationId === event.conversationId) event.replyTo = parent.rootId;
-    const prefix = activationLength(event.text, config.activation);
-    const command = prefix ? event.text.slice(prefix).replace(/^[\s，,:：]+/u, '') : '';
-    const explicitOkr = /^okr(?=$|[\s，,:：])/iu.test(command);
+    const entry = explicitEntry(event.text, config.activation);
+    const prefix = entry?.prefix ?? 0;
+    const command = entry?.instruction ?? '';
+    const legacyInstruction = legacyOkrInstruction(entry);
+    const explicitOkr = entry?.module === 'okr' || legacyInstruction !== null;
     const linkedOkr = !prefix && parent?.route === 'okr' && parent.senderId === event.senderId
       && parent.conversationId === event.conversationId;
     const isOkr = explicitOkr || linkedOkr;
@@ -131,20 +137,27 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
         return deliverResult(event, { status: 'source_changed', receipt: '这条回复的正文已发生变化，本次未处理。请将希望讨论的完整内容作为新消息回复原 OKR 对话。' });
       }
     }
+    const previousSource = store.get('source:' + id);
+    if (previousSource && (previousSource.textHash !== hash(event.text)
+      || (previousSource.eventHash && previousSource.eventHash !== hash(event)))) {
+      return deliverResult(event, { status: 'event_conflict', receipt: '同一消息 ID 的内容不一致，未新增操作。' });
+    }
+    const cached = store.get('routed-result:' + id);
+    if (cached) return deliverRouted(event, cached.result);
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
-      rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), ...(isOkr ? { route: 'okr' } : {}) });
+      rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
     let result;
-    if (isOkr) {
-      const instruction = explicitOkr ? command.slice(3).replace(/^[\s，,:：]+/u, '') : '';
-      let action;
-      if ((linkedOkr && event.text.trim() === '确认定稿') || instruction === '确认定稿') action = 'confirm';
-      else if (linkedOkr) action = 'record';
-      else if (/^(讨论|续接)$/u.test(instruction)) action = 'open';
-      else if (instruction === '暂停') action = 'pause';
-      else if (/^记录[\s，,:：]/u.test(instruction)) action = 'record';
-      const text = action !== 'record' ? '' : linkedOkr ? event.text : instruction.replace(/^记录[\s，,:：]+/u, '');
+    if (entry?.module === 'review') {
+      result = { status: 'review_unavailable', receipt: 'Review 功能尚未实现/启用。日/周/专题复盘及注册均待后续交付，本次未读取或写入业务记录。' };
+    } else if (isOkr) {
+      const instruction = explicitOkr ? (entry.module === 'okr' ? command : legacyInstruction) : '';
+      const parsed = okrInstruction(instruction);
+      const blockedReply = linkedOkr && gtdGuard(event.text);
+      const action = blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
+        : 'record' : parsed.action;
+      const text = action !== 'record' ? '' : linkedOkr ? event.text : parsed.text;
       if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
-      else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 gtd okr 讨论”，回复关联消息记录文字，或使用“okr 记录：内容”“okr 暂停”。' };
+      else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 okr 讨论/续接”，回复关联消息记录文字，或使用“小婕 okr 记录：内容”“小婕 okr 暂停”。查询、规划和调整尚未实现；定稿须回复当前草案“确认定稿”。' };
       else {
         const confirmVersion = parentReceipt?.route === 'okr' && parentReceipt.senderId === event.senderId
           && parentReceipt.conversationId === event.conversationId ? parentReceipt.draftVersion : undefined;
@@ -172,7 +185,21 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       }
     } else result = await capture.handle(event);
     if (result.draftVersion) store.set('source:' + id, { ...store.get('source:' + id), draftVersion: result.draftVersion });
+    if (['review_unavailable', 'okr_unavailable', 'okr_help'].includes(result.status)) {
+      store.set('routed-result:' + id, { event, result });
+      return deliverRouted(event, result);
+    }
     return deliverResult(event, result);
+  }
+  async function deliverRouted(event, result) {
+    if (!config.allowedSenderIds.includes(event.senderId) || !config.allowedConversationIds.includes(event.conversationId)) {
+      return { status: 'forbidden', receipt: null };
+    }
+    const retry = { ...result };
+    if (retry.delivery === 'pending') delete retry.delivery;
+    const delivered = await deliverResult(event, retry);
+    store.set('routed-result:' + event.id, { event, result: delivered });
+    return delivered;
   }
   async function deliverResult(event, result) {
     if (result.receipt && !result.delivery) {
@@ -203,7 +230,13 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       const input = Object.fromEntries(fields.map(name => [name, ctx[name]]));
       return enqueue(() => handle(input), signal);
     },
-    recover() { return enqueue(() => capture.recover()); },
+    recover() { return enqueue(async () => {
+      const results = await capture.recover();
+      for (const [, cached] of store.entries('routed-result:')) {
+        if (cached.result.delivery !== 'sent') results.push(await deliverRouted(cached.event, cached.result));
+      }
+      return results;
+    }); },
     async close() { if (closed) return; closed = true; await queue; await capture.close(); await okr?.close(); store.close(); },
   };
 }

@@ -17,7 +17,8 @@ test('CLI 从本地配置激活，逐条输出回执和模拟条目，重启读�
     const run = spawnSync(process.execPath, ['src/cli.js', '--config', path], { input, encoding: 'utf8', timeout: 5000 });
     assert.equal(run.status, 0, run.stderr);
     const outputs = run.stdout.trim().split('\n').map(line => JSON.parse(line));
-    assert.equal(outputs[0].result.status, 'not_handled');
+    assert.equal(outputs[0].result.status, 'collected');
+    assert.equal(outputs[0].item.title, '旧词');
     assert.equal(outputs[1].result.status, 'collected');
     assert.equal(outputs[1].mode, 'simulation');
     assert.equal(outputs[1].item.title, '新词');

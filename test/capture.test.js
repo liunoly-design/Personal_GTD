@@ -8,13 +8,14 @@ const event = (text, extra = {}) => ({
   sentAt: '2026-09-27T10:00:00+08:00', type: 'text', text, ...extra,
 });
 
-test('只有配置的完整开头激活词触发明确收集，普通聊天不写入，激活后的正文默认收集', async () => {
+test('自定义与默认 GTD 入口并存，普通聊天不写入，激活后的正文默认收集', async () => {
   const { capture, reminders } = setup({ config: { activation: '收件助手' } });
-  for (const text of ['小婕 GTD，收集：想法', '正文提到收件助手，收集：想法', '收件助手扩展，收集：想法', '“收件助手，收集：想法”']) {
+  for (const text of ['正文提到收件助手，收集：想法', '收件助手扩展，收集：想法', '“收件助手，收集：想法”']) {
     assert.equal((await capture.handle(event(text))).status, 'not_handled');
   }
+  assert.equal((await capture.handle(event('小婕 GTD，收集：想法'))).status, 'collected');
   assert.equal((await capture.handle(event('收件助手，这篇文章怎么样：https://example.org'))).status, 'collected');
-  assert.equal((await reminders.listItems()).length, 1);
+  assert.equal((await reminders.listItems()).length, 2);
   const result = await capture.handle(event('收件助手，帮我记录一下：周末的想法'));
   assert.equal((await reminders.getItem(result.itemId)).title, '周末的想法');
 });

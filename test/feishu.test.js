@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openFeishuCapture } from '../src/feishu-capture.js';
+import { openFeishuCapture, validateFeishuScope } from '../src/feishu-capture.js';
 import { openPersistentSimulation } from '../src/persistent-simulation.js';
 import { simulatedAnalysis } from '../src/simulation.js';
 
@@ -248,12 +248,12 @@ test('飞书显式确认必须回复当前草案，定稿不会创建 Inbox 事�
   const okrGuide=sampleGuide();
   const f=fixture(t,{config:{okr:{account:'iCloud',folder:'Notes'}},notesBridge,okrGuide});
   const send=async(id,text,parent)=>{f.messages.set(id,message(id,text,parent?{parent_id:parent}:{}));return f.capture.handle({...context(id,text),...(parent?{ReplyToId:parent}:{})});};
-  await send('om_start','小婕 GTD okr 讨论');
+  await send('om_start','小婕 okr 讨论');
   for(let i=1;i<=7;i++)await send('om_r'+i,'合成回答'+i,f.sent.at(-1).message_id);
   const ready=f.sent.at(-1).message_id;
   assert.equal((await send('om_self','确认定稿','om_r4')).status,'okr_needs_confirmation');
   assert.equal((await send('om_bare','小婕 GTD okr 确认定稿')).status,'okr_needs_confirmation');
-  const result=await send('om_confirm','确认定稿',ready);
+  const result=await send('om_confirm','小婕 okr 确认定稿',ready);
   assert.equal(result.status,'okr_finalized');assert.equal(notes.length,2);
   assert.equal((await f.reminders.listItems()).length,0);assert.equal(f.calls,0);
 });
@@ -353,4 +353,218 @@ test('OKR 界面占用可辨识，未知异常的私人正文不会进入回执�
     assert.doesNotMatch(JSON.stringify(result), /private note contents/);
     if (failure === 'NOTES_UI_BUSY') assert.match(result.receipt, /另一项操作/);
   }
+});
+
+test('平级 Review 入口准确答复、重投不重复回执且不写业务对象', async t => {
+  const f = fixture(t);
+  const text = '  小婕REVIEW：日复盘';
+  f.messages.set('om_review', message('om_review', text));
+  const ctx = context('om_review', text);
+  assert.equal((await f.capture.handle(ctx)).status, 'review_unavailable');
+  await f.restart();
+  assert.equal((await f.capture.handle(ctx)).status, 'review_unavailable');
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0].text, /尚未.*实现|尚未.*启用/);
+  assert.equal(f.calls, 0);
+  assert.equal((await f.reminders.listItems()).length, 0);
+});
+
+function syntheticNotes() {
+  const notes = [];
+  let calls = 0;
+  const bridge = async r => {
+    calls++;
+    if (r.command === 'bind') return { accountId: 'a', folderId: 'f' };
+    if (r.command === 'create') {
+      const n = { id: 'note' + (notes.length + 1), body: r.body, plaintext: r.body.replaceAll('<br>', '\n') };
+      notes.push(n); return { ...n };
+    }
+    const n = notes.find(n => n.id === r.noteId);
+    if (r.command === 'append') { assert.equal(n.body, r.expectedBody); n.body += r.addition; n.plaintext = n.body.replaceAll('<br>', '\n'); }
+    return { ...n };
+  };
+  return { notes, bridge, get calls() { return calls; } };
+}
+async function dispatch(f, id, text, parent_id, extra = {}) {
+  f.messages.set(id, message(id, text, { parent_id, ...extra }));
+  return f.capture.handle({ ...context(id, text), ReplyToId: parent_id });
+}
+
+test('新 OKR 讨论/记录等义表达复用旧会话，明确入口优先于 GTD 回复', async t => {
+  const n = syntheticNotes();
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge });
+  await dispatch(f, 'om_gtd', '小婕 gtd 买牛奶');
+  assert.equal((await dispatch(f, 'om_new', '小婕 OKR：聊聊', f.sent[0].message_id)).status, 'okr_open');
+  assert.equal((await dispatch(f, 'om_record', '小婕 okr 帮我记一下：合成回答')).status, 'okr_saved');
+  await f.restart();
+  assert.equal((await dispatch(f, 'om_old', '小婕 gtd okr 续接')).status, 'okr_open');
+  assert.equal((await dispatch(f, 'om_answer', '好的', f.sent[1].message_id)).status, 'okr_saved');
+  assert.match(n.notes[0].body, /合成回答/);
+  assert.match(n.notes[0].body, /好的/);
+  assert.equal(n.notes.length, 1);
+  assert.equal((await f.reminders.listItems()).length, 1);
+});
+
+test('GTD 明确查询维护和否定引用歧义不会误收集，普通任务与明确引用正文仍收集', async t => {
+  const f = fixture(t);
+  const blocked = ['查询任务', '看看今天还有什么没做', '查一下明天的日程', '记录过什么', '完成任务：买牛奶',
+    '将所选任务标记完成', '新建日程：周会', '整理 Inbox', '别记录这句话', '如果我说完成任务：买牛奶',
+    '“收集：买牛奶”', '收集牛奶并查询任务', '复盘昨天', '小婕 okr 讨论'];
+  for (const [i, body] of blocked.entries()) {
+    const result = await dispatch(f, 'om_block' + i, '小婕 gtd ' + body);
+    assert.ok(['gtd_unsupported', 'needs_instruction'].includes(result.status), body + ': ' + result.status);
+  }
+  assert.equal(f.calls, 0);
+  assert.equal((await f.reminders.listItems()).length, 0);
+  for (const [i, body] of ['完成一份报告', '明天完成报告', '帮我记一下 买牛奶', '存一下：合成想法',
+    '收集：他说“别记录这句话”', 'OKR 和复盘的资料', 'review 日复盘'].entries()) {
+    assert.equal((await dispatch(f, 'om_save' + i, '小婕 gtd ' + body)).status, 'collected', body);
+  }
+  assert.equal((await f.reminders.listItems()).length, 7);
+});
+
+test('自定义激活词保留 GTD，默认三个入口并存且启动拒绝跨模块冲突', async t => {
+  const f = fixture(t, { config: { activation: '记事' } });
+  assert.equal((await dispatch(f, 'om_custom', '记事 买牛奶')).status, 'collected');
+  assert.equal((await dispatch(f, 'om_default', '小婕gtd 买苹果')).status, 'collected');
+  assert.equal((await dispatch(f, 'om_okr_new', '小婕 okr 讨论')).status, 'okr_unavailable');
+  assert.equal((await dispatch(f, 'om_review_new', '小婕 review')).status, 'review_unavailable');
+  for (const activation of ['小婕 OKR', '小婕okr 讨论', '小婕 review 注册', '小婕']) {
+    assert.throws(() => validateFeishuScope({ ...scope, activation }), /activation.*conflict/i, activation);
+  }
+  const same = fixture(t, { config: { activation: '小婕GTD' } });
+  assert.equal((await dispatch(same, 'om_same', '小婕 GTD 买牛奶')).status, 'collected');
+});
+
+test('不可用入口原文冲突不能改路由，丢失回执跨重启停止重发', async t => {
+  const f = fixture(t, { loseReply: true });
+  const text = '小婕 review 注册周复盘';
+  assert.equal((await dispatch(f, 'om_sameid', text)).delivery, 'pending');
+  await f.restart();
+  const conflict = await dispatch(f, 'om_sameid', '小婕 gtd 买牛奶');
+  assert.equal(conflict.status, 'event_conflict');
+  assert.equal(conflict.delivery, 'pending');
+  assert.equal((await f.capture.recover()).at(-1).delivery, 'pending');
+  assert.equal(f.sent.length, 2);
+  assert.equal((await f.reminders.listItems()).length, 0);
+});
+
+test('三个命名空间边界、空入口和 OKR 否定/查询均不新增业务调用', async t => {
+  const n = syntheticNotes();
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge });
+  for (const [i, text] of ['小婕', '小婕 okrx 讨论', '小婕 reviewable 日复盘', '正文 小婕 okr 讨论',
+    '“小婕 gtd 买牛奶”', '> 小婕 review 日复盘'].entries()) {
+    assert.equal((await dispatch(f, 'om_boundary' + i, text)).status, 'not_handled');
+  }
+  for (const [i, text] of ['小婕 okr', '小婕 OKR：未知动作', '小婕 okr 看看当前目标', '小婕 okr 不要记录这句话',
+    '小婕 okr “记录：引用”', '小婕 okr 讨论并删除任务', '小婕 okr 好的'].entries()) {
+    assert.equal((await dispatch(f, 'om_help' + i, text)).status, 'okr_help');
+  }
+  assert.equal((await dispatch(f, 'om_empty', '小婕GTD')).status, 'needs_instruction');
+  assert.equal(n.calls, 0);
+  assert.equal(f.calls, 0);
+  assert.equal((await f.reminders.listItems()).length, 0);
+  await dispatch(f, 'om_start_guard', '小婕 okr 讨论');
+  const parent = f.sent.at(-1).message_id;
+  const before = n.calls;
+  assert.equal((await dispatch(f, 'om_link_query', '查询当前目标', parent)).status, 'okr_help');
+  assert.equal((await dispatch(f, 'om_link_neg', '不要记录这句话', parent)).status, 'okr_help');
+  assert.equal(n.calls, before);
+});
+
+test('提醒明确等义表达仍更新同一事项并保留原文', async t => {
+  const f = fixture(t);
+  for (const [i, verb] of ['提醒我', '到时候叫我', '记得通知我'].entries()) {
+    const text = '小婕GTD，' + verb + '明天下午三点交报价';
+    const result = await dispatch(f, 'om_syn_remind' + i, text);
+    assert.equal(result.status, 'reminder_set');
+    assert.equal(result.remindAt, '2026-09-28T07:00:00Z');
+    assert.match((await f.reminders.listItems()).at(-1).notes, new RegExp(verb));
+  }
+  assert.equal((await f.reminders.listItems()).length, 3);
+});
+
+test('空提醒同义指令只要求补充内容，不写入空任务', async t => {
+  const f = fixture(t);
+  for (const [i, body] of ['到时候叫我', '记得通知我', '帮我记一下：', '存一下'].entries()) {
+    assert.equal((await dispatch(f, 'om_empty_syn' + i, '小婕 gtd ' + body)).status, 'needs_instruction');
+  }
+  assert.equal(f.calls, 0);
+});
+
+test('平级入口仍核对真实身份、更新标记及原消息正文，不信任上下文路由', async t => {
+  const f = fixture(t);
+  for (const [i, extra] of [{ sender: { id: 'ou_other', id_type: 'open_id', sender_type: 'user' } },
+    { chat_id: 'oc_other' }, { updated: true }, { deleted: true }].entries()) {
+    assert.equal((await dispatch(f, 'om_invalid_new' + i, '小婕 okr 讨论', undefined, extra)).status, 'invalid_source');
+  }
+  f.messages.set('om_truth', message('om_truth', '普通聊天'));
+  assert.equal((await f.capture.handle(context('om_truth', '小婕 review 日复盘'))).status, 'not_handled');
+  assert.equal(f.sent.length, 0);
+  assert.equal(f.calls, 0);
+});
+
+test('旧 OKR 未知动作和记录查询仍留在 OKR，不落入默认收集', async t => {
+  const f = fixture(t);
+  for (const [i, body] of ['未知动作', '记录过什么', '查询当前目标'].entries()) {
+    assert.equal((await dispatch(f, 'om_legacy_help' + i, '小婕 gtd okr ' + body)).status, 'okr_unavailable');
+  }
+  assert.equal(f.calls, 0);
+  assert.equal((await f.reminders.listItems()).length, 0);
+});
+
+test('插件接管三个明确入口，Review 不可用也结束宿主派发且权限范围不扩大', async t => {
+  const { createPlugin } = await import('../openclaw/index.js');
+  const f = fixture(t);
+  let hook;
+  const processed = [], hostReplies = [];
+  createPlugin({ openRuntime: async () => f.capture }).register({ pluginConfig: { ...scope, enabled: true }, config: {},
+    logger: { info() {}, warn() {} }, registerService() {}, on(name, fn) { assert.equal(name, 'reply_dispatch'); hook = fn; } });
+  const host = { recordProcessed(...args) { processed.push(args); }, markIdle() {},
+    dispatcher: { getQueuedCounts() { return {}; }, sendFinalReply(input) { hostReplies.push(input); return true; } } };
+  for (const [i, text] of ['小婕 gtd 买牛奶', '小婕 okr 讨论', '小婕 review 日复盘'].entries()) {
+    const id = 'om_plugin_entry' + i;
+    f.messages.set(id, message(id, text));
+    assert.equal((await hook({ ctx: context(id, text), sendPolicy: 'allow' }, host)).handled, true);
+  }
+  assert.equal(processed.length, 3);
+  assert.equal(hostReplies.length, 0);
+  assert.equal((await hook({ ctx: { ...context('om_bad', '小婕 review 日复盘'), SenderId: 'ou_other' }, sendPolicy: 'allow' }, host)), undefined);
+  assert.equal((await f.reminders.listItems()).length, 1);
+});
+
+test('未启用入口也受原文容量限制，超限准确提示且不建立后续关联', async t => {
+  const f = fixture(t, { config: { maxInputChars: 40 } });
+  const text = '小婕 review ' + '合成'.repeat(30);
+  assert.equal((await dispatch(f, 'om_huge_entry', text)).status, 'input_too_large');
+  assert.equal(f.sent.length, 1);
+  assert.equal((await dispatch(f, 'om_huge_reply', '好的', 'om_huge_entry')).status, 'not_handled');
+});
+
+test('OKR 显式复合请求不部分启动流程，明确收集中的引用保留', async t => {
+  const n = syntheticNotes();
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge });
+  assert.equal((await dispatch(f, 'om_compound_open', '小婕 okr 讨论 然后查询当前目标')).status, 'okr_help');
+  assert.equal(n.calls, 0);
+  assert.equal((await dispatch(f, 'om_quoted_content', '小婕 gtd 收集：他说“先讨论然后查询当前目标”')).status, 'collected');
+});
+
+test('旧 OKR 记录指令尾部空白保留，重投不改变历史事件指纹', async t => {
+  const n = syntheticNotes();
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge });
+  await dispatch(f, 'om_space_open', '小婕 gtd okr 讨论');
+  await dispatch(f, 'om_space_record', '小婕 gtd okr 记录：合成原文  ');
+  assert.ok(n.notes[0].body.includes('合成原文  </div>'));
+  await f.restart();
+  assert.equal((await dispatch(f, 'om_space_record', '小婕 gtd okr 记录：合成原文  ')).status, 'okr_saved');
+});
+
+test('不可用回执恢复也采用当前权限，不向已移出白名单的会话续发', async t => {
+  const config = {};
+  const f = fixture(t, { config, loseReply: true });
+  await dispatch(f, 'om_scope_recovery', '小婕 review 日复盘');
+  config.allowedConversationIds = ['oc_other'];
+  await f.restart();
+  assert.equal((await f.capture.recover()).at(-1).status, 'forbidden');
+  assert.equal(f.sent.length, 1);
 });

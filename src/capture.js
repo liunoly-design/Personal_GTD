@@ -3,7 +3,7 @@ import { createCollector } from './actions/collect.js';
 import { createReminderSetter } from './actions/set-reminder.js';
 import { createReminderClarifier } from './actions/clarify-reminder.js';
 import { confirmLink } from './actions/confirm-link.js';
-import { activationLength } from './activation.js';
+import { explicitEntry, gtdGuard, validateEntryActivation } from './explicit-entries.js';
 import { validInstant, validTimeZone } from './reminder-time.js';
 
 export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString(), checkpoint = {} }) {
@@ -14,6 +14,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
   if (typeof config.activation !== 'string' || !config.activation.trim() || config.activation !== config.activation.trim()) {
     throw new Error('activation must be a nonempty trimmed string');
   }
+  validateEntryActivation(config.activation);
   if (typeof config.timeZone !== 'string' || !validTimeZone(config.timeZone)) throw new Error('Invalid timeZone');
   for (const name of ['maxInputChars', 'analysisTimeoutMs']) {
     if (!Number.isSafeInteger(config[name]) || config[name] < 1) throw new Error(`Invalid ${name}`);
@@ -52,7 +53,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
   }
 
   function activated(event) {
-    return activationLength(event.text, activation) > 0;
+    return explicitEntry(event.text, activation)?.module === 'gtd';
   }
   function canHandle(event) {
     if (activated(event)) return true;
@@ -99,10 +100,10 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
         }
         return { status: 'not_handled', receipt: null };
       }
-      const remainder = event.text.slice(activationLength(event.text, activation));
-      if (remainder && !/^[\s，,:：]/u.test(remainder)) return { status: 'not_handled', receipt: null };
-      const instruction = remainder.replace(/^[\s，,:：]+/u, '');
-      const reminder = instruction.match(/^(?:请)?(?:帮我)?提醒我([\s\S]+)$/u);
+      const instruction = explicitEntry(event.text, activation).instruction;
+      const guarded = gtdGuard(instruction);
+      if (guarded) return guarded;
+      const reminder = instruction.match(/^(?:请)?(?:帮我)?(?:提醒我|到时候叫我|记得通知我)([\s\S]+)$/u);
       if (reminder && reminder[1].trim()) {
         const existing = reminderRequests.get(key(event));
         if (existing?.result) return existing.result;
@@ -114,10 +115,10 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
         pending.set(key(event), { event: structuredClone(event), content: instruction.trim() });
         return { status: 'awaiting_confirmation', receipt: '【模拟】是否收集这个链接？请关联原消息回复“确认”或“取消”。' };
       }
-      const match = instruction.match(/^(?:请)?(?:帮我)?(?:收集|记录|记下|保存)(?:一下)?[\s:：，,]+([\s\S]*)$/u);
+      const match = instruction.match(/^(?:请)?(?:帮我)?(?:收集|记录|记一下|记下|记|保存|存一下)(?:一下)?[\s:：，,]+([\s\S]*)$/u);
       const content = match?.[1].replace(/^[\s:：，,]+/u, '').trim();
       if (!content) {
-        if (!instruction.trim() || match || /^(?:请)?(?:帮我)?(?:收集|记录|记下|保存|提醒我)(?:一下)?$/u.test(instruction.trim())) {
+        if (!instruction.trim() || match || /^(?:请)?(?:帮我)?(?:收集|记录|记一下|记下|记|保存|存一下|提醒我|到时候叫我|记得通知我)(?:一下)?$/u.test(instruction.trim())) {
           return { status: 'needs_instruction', receipt: '【模拟】请补充要收集的内容；未创建事项。' };
         }
         if (config.modelIntents) {
