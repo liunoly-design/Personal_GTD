@@ -285,7 +285,7 @@ npm run verify:notes-tags -- --write-synthetic
 
 OKR 备忘录失败时，网关 `personal-gtd` 日志会记录白名单错误码及 Apple 操作阶段（如 `APPLE_TIMEOUT` / `read`），本地状态保留对应诊断，不记录异常正文。超时或写入结果未知时先核对原记录，避免直接重复提交。
 
-## F601/T01：三个平级显式入口（本地代码验收，未部署）
+## F601/T01：三个平级显式入口（已部署，真实入口验收待测）
 
 可信飞书文字入口支持 `小婕 gtd XXX`、`小婕 okr XXX`、`小婕 review XXX`；英文模块名忽略大小写，允许前导空白、词间零个/多个空格，模块后需空白、逗号、冒号或消息结束。旧 `小婕 gtd okr 讨论/续接/记录/暂停/确认定稿` 继续使用同一 OKR 配置、会话与笔记。仅模块词返回补内容/帮助或当前不可用说明。
 
@@ -302,4 +302,4 @@ npm run test:entries
 npm run demo:entries
 ```
 
-`demo:entries` 使用固定合成时钟、同一临时状态目录及两个独立进程，覆盖三个入口、旧 OKR 别名/回复、旧 GTD 无模块标签的链接确认、重投与恢复。最终为一篇合成笔记、两条模拟事项、十条模拟回执；路由模型调用、付费调用和真实写入均为零。CLI `npm start` 仍是 GTD 收集模拟，三个模块的公开入口验收使用上述可信飞书模拟。证据与未测项见 [F601/T01 任务记录](.scratch/f601-explicit-entries/issues/01-explicit-entries.md)；三个独立 Agent、真实飞书/Apple/模型及生产部署尚未由本任务验收。
+`demo:entries` 使用固定合成时钟、同一临时状态目录及两个独立进程，覆盖三个入口、旧 OKR 别名/回复、旧 GTD 无模块标签的链接确认、重投与恢复。最终为一篇合成笔记、两条模拟事项、十条模拟回执；路由模型调用、付费调用和真实写入均为零。CLI `npm start` 仍是 GTD 收集模拟，三个模块的公开入口验收使用上述可信飞书模拟。证据与未测项见 [F601/T01 任务记录](.scratch/f601-explicit-entries/issues/01-explicit-entries.md)；三个独立 Agent 与新版真实飞书/Apple/模型闭环尚未由本任务验收。2026-10-01 已按用户授权重启现有网关加载新版，连接与插件检查通过，见 [部署记录](docs/deployment/f601-explicit-entries-2026-10-01.md)。

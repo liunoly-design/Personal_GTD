@@ -1,0 +1,35 @@
+# F601/T01 平级入口部署记录
+
+2026-10-01，用户明确授权：“部署，我要用飞书测试”。业务代码提交 `c6dbb7c`，插件版本继续为 0.1.0；采用既有仓库链接加载，无需重新安装或修改宿主路由。
+
+## 部署范围与实际证据
+
+- 链接来源仍为当前仓库 `openclaw/index.js`，账户 default、入口 xiaojie，既有发送者及会话白名单各一项。未扩大权限、未改 Apple/Notes 绑定或共享账本路径。
+- 重启前以只读方式检查原状态布局：收集日志没有未完成业务操作或待发送回执，OKR 没有 pending/publication 写入。未读取或输出私人正文。
+- 备份原宿主配置、私有运行配置、launchd 定义和五个 SQLite 快照到 Git 忽略的 `runtime/feishu/f601-deploy-backup-20261001-195028/`，目录 0700、文件 0600。没有清理或重置原状态。
+- 当前配置通过 `validateFeishuScope`；执行 `openclaw gateway restart` 成功重启 `gui/502/ai.openclaw.gateway`。保留原 launchd wrapper 和代理环境，无需备用重启命令。
+- `openclaw gateway status --json`：服务 active/running，新 PID 10793（原 PID 5667），RPC 连接成功。RPC 能力显示 connected_no_operator_scope；没有将连接成功写成完整 operator health 验收。
+- `openclaw plugins inspect personal-gtd --runtime --json`：来源当前仓库，status loaded，typed hook 为 reply_dispatch、priority 100，service 为 personal-gtd，无插件错误。此命令检查本地运行加载；结合新进程启动核对部署，不替代真实消息闭环。
+- `openclaw channels status --channel feishu --probe --json`：default 账户 enabled/running，probe.ok=true，lastError=null。
+
+## 模型额度与用户待验收
+
+部署前共享账本已有 55 次调用，上限 55；预算占用约 0.386038425 USD，金额上限 0.5 USD，halt=false。保持历史账本及所有额度不变，本次部署未新增付费模型调用。已向用户询问是否将本轮调用上限增加到 65 次、金额上限仍为 0.5 USD；未收到授权前不修改上限。
+
+用户可先发送以下纯文本（不要在前面放 @ 提及或引文）：
+
+| 语句 | 预期 |
+| --- | --- |
+| 小婕 review 日复盘 | Review 尚未实现/启用，不读取或写入业务记录 |
+| 小婕 gtd 查询任务 | 查询尚未实现，不创建 Inbox 项 |
+| 小婕 okr | OKR 帮助，不创建业务记录或调用模型 |
+| 小婕 okr 讨论 | 进入已有绑定日志的讨论；不进入 Inbox |
+| 小婕 gtd okr 续接 | 旧入口续接同一会话/日志 |
+
+普通 GTD 收集仍可在模型额度耗尽时保存原文并准确提示分析未完成；OKR 回答可记录原文但无法完整验证模型引导，提醒自然语言分析也可能因额度耗尽待澄清。因此完整模型/提醒验收应在额度授权明确后继续，不清账本绕过限制。
+
+## 验收边界
+
+本轮完成部署与连接/加载检查，用户真实入站 → 入口分派 → Apple/Notes → 飞书回执仍待用户逐项测试。没有主动向飞书发送测试消息，没有触发新增 Apple/Notes 业务写入，没有新增定时任务。开发证据仍为 152 项完整测试、53 项入口检查及合成双进程演示，见 [T01](../../.scratch/f601-explicit-entries/issues/01-explicit-entries.md)。
+
+回执或写入未知时保留原消息并核对原状态；不要重发新 ID 或删除数据库。回滚通过禁用插件并重启网关执行，保留状态、账本和已写业务对象；不整份还原宿主配置覆盖其他变更。
