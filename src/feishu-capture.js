@@ -153,14 +153,21 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
         }
         catch (error) {
           const code = ['INVALID_INPUT', 'CONFLICT', 'CAPACITY_EXCEEDED', 'BUDGET_EXHAUSTED', 'CREATE_RESULT_UNKNOWN',
-            'UPDATE_RESULT_UNKNOWN', 'RECOVERY_REQUIRED', 'READBACK_FAILED', 'PERMISSION_DENIED', 'ACCESSIBILITY_DENIED', 'LOCATION_NOT_UNIQUE'].includes(error.message)
+            'UPDATE_RESULT_UNKNOWN', 'RECOVERY_REQUIRED', 'READBACK_FAILED', 'PERMISSION_DENIED', 'ACCESSIBILITY_DENIED', 'LOCATION_NOT_UNIQUE', 'APPLE_TIMEOUT', 'NOTES_UI_BUSY', 'EDITOR_UNAVAILABLE', 'UI_FOCUS_CHANGED',
+            'AX_SELECTION_FAILED', 'HEADING_FORMAT_FAILED', 'TAG_READ_FAILED', 'TAG_WRITE_FAILED',
+            'TAG_WRITE_INCOMPLETE', 'TAG_DELIMITER_REQUIRED', 'UNSUPPORTED_NOTE', 'BRIDGE_UNAVAILABLE',
+            'APPLE_RESULT_UNKNOWN', 'WRITE_RESULT_UNKNOWN', 'RESPONSE_TOO_LARGE'].includes(error.message)
             ? error.message : 'NOTES_UNAVAILABLE';
           const explanation = code === 'INVALID_INPUT' ? '请使用不超过 4000 字的非空文字。'
             : code === 'ACCESSIBILITY_DENIED' ? '网关运行程序（node）的辅助功能权限未开启，请在 macOS“隐私与安全性 → 辅助功能”中开启后再试。'
+            : code === 'APPLE_TIMEOUT' ? '备忘录操作超时。请保留原消息，核对保存状态后恢复，避免重复提交。'
+            : code === 'NOTES_UI_BUSY' ? '备忘录正在被另一项操作使用。请保留原消息，待操作结束后核对恢复。'
             : code === 'PERMISSION_DENIED' ? '请检查网关运行程序控制备忘录的自动化权限。'
             : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
             : '请保留原消息，核对备忘录后再继续。';
-          result = { status: 'okr_error', code, receipt: `OKR 记录未确认完成。${explanation}` };
+          const operation = ['bind', 'find', 'create', 'read', 'append', 'replace'].includes(error.operation) ? error.operation : 'unknown';
+          store.set('okr-error:' + hash([event.senderId, event.conversationId, event.id]), { code, operation, at: now() });
+          result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。${explanation}` };
         }
       }
     } else result = await capture.handle(event);

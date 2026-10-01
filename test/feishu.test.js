@@ -324,3 +324,33 @@ test('OKR更新回复正文不一致或同ID改文时提示重发，不能重新
   f.messages.set('om_confirm_edit', message('om_confirm_edit', '确认定稿', { parent_id: parent, updated: true }));
   assert.equal((await f.capture.handle({ ...context('om_confirm_edit', '确认定稿'), ReplyToId: parent })).status, 'invalid_source');
 });
+
+test('OKR 读取超时保留错误与操作阶段，不冒充权限错误', async t => {
+  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes', noteId: 'n_test' } },
+    notesBridge: async r => {
+      if (r.command === 'bind') return { accountId: 'a_test', folderId: 'f_test' };
+      throw new Error('APPLE_TIMEOUT');
+    } });
+  const text = '小婕 GTD okr 讨论';
+  f.messages.set('om_timeout', message('om_timeout', text));
+  const result = await f.capture.handle(context('om_timeout', text));
+  assert.equal(result.code, 'APPLE_TIMEOUT');
+  assert.equal(result.operation, 'read');
+  assert.match(result.receipt, /超时/);
+  assert.doesNotMatch(result.receipt, /权限/);
+  assert.equal(f.calls, 0);
+});
+
+test('OKR 界面占用可辨识，未知异常的私人正文不会进入回执或错误码', async t => {
+  for (const [failure, expected] of [['NOTES_UI_BUSY', 'NOTES_UI_BUSY'], ['private note contents', 'NOTES_UNAVAILABLE']]) {
+    const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } },
+      notesBridge: async () => { throw new Error(failure); } });
+    const text = '小婕 GTD okr 讨论';
+    f.messages.set('om_failure', message('om_failure', text));
+    const result = await f.capture.handle(context('om_failure', text));
+    assert.equal(result.code, expected);
+    assert.equal(result.operation, 'bind');
+    assert.doesNotMatch(JSON.stringify(result), /private note contents/);
+    if (failure === 'NOTES_UI_BUSY') assert.match(result.receipt, /另一项操作/);
+  }
+});

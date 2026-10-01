@@ -35,7 +35,8 @@ export function createPlugin({ openRuntime = defaultOpenRuntime } = {}) {
           api.logger.info('personal-gtd: ' + JSON.stringify({ status: result.status, delivery: result.delivery ?? 'none',
             latencyMs: Math.round(performance.now() - started), calls: result.analysis?.calls ?? 0,
             inputTokens: result.analysis?.inputTokens ?? null, outputTokens: result.analysis?.outputTokens ?? null,
-            estimatedCostUsd: result.analysis?.estimatedCostUsd ?? null, failureReason: result.analysis?.failureReason ?? null }));
+            estimatedCostUsd: result.analysis?.estimatedCostUsd ?? null, failureReason: result.code ?? result.guidanceFailure ?? result.analysis?.failureReason ?? null,
+            operation: result.operation ?? null }));
           return finish(result.status);
         } catch {
           api.logger.warn('personal-gtd: request_unconfirmed; inspect private state before retry');

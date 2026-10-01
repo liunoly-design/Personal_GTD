@@ -49,9 +49,14 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
       return finish({ status: 'okr_paused', receipt: 'OKR 记录已暂停。发送“小婕 gtd okr 讨论”后继续。' });
     }
     let calls = 0;
-    const call = request => {
+    const call = async request => {
       if (++calls > (event.action === 'confirm' ? 12 : 8)) throw new Error('BUDGET_EXHAUSTED');
-      return bridge(request);
+      try { return await bridge(request); }
+      catch (cause) {
+        const error = new Error(cause instanceof Error ? cause.message : 'NOTES_UNAVAILABLE');
+        error.operation = request.command;
+        throw error;
+      }
     };
     let state = store.get('note');
     if (!state) {

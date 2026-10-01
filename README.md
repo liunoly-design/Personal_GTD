@@ -282,3 +282,5 @@ npm run verify:notes-tags -- --write-synthetic
 已将 grilling 的依赖问题访谈、okr-design 的结果指标方法和 okr-creator 的验收思想接入同一位 OKR 教练。运行模型与个人OKR技能共用 `src/okr-method.md`：逐项质询，未知数据保留未知，承诺底线单独判断，GTD行动作为候选且不替代KR证据。
 
 [来源比较与采用边界](docs/requirements/OKR技能比较与整合.md)；[验证记录](docs/deployment/okr-method-integration.md)。可用 `npm run evaluate:okr-method -- --allow-model`执行两个真实模型合成样例（消耗已配置共享预算，不访问Apple或发送飞书）。
+
+OKR 备忘录失败时，网关 `personal-gtd` 日志会记录白名单错误码及 Apple 操作阶段（如 `APPLE_TIMEOUT` / `read`），本地状态保留对应诊断，不记录异常正文。超时或写入结果未知时先核对原记录，避免直接重复提交。
