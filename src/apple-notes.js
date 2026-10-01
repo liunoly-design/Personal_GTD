@@ -60,8 +60,18 @@ export function createNotesBridge({ script: scriptBridge = callNotesScript, edit
     const script = input => scriptBridge(input, { timeoutMs: remaining() });
     const scope = { accountId: request.accountId, folderId: request.folderId };
     async function read(id, command = 'read', extra = {}) {
-      const raw = await script({ ...scope, command: 'show', noteId: id });
-      const value = await editor({ command, rawPlaintext: raw.plaintext, ...extra }, remaining());
+      let value;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const raw = await script({ ...scope, command: 'show', noteId: id });
+        try {
+          value = await editor({ command, rawPlaintext: raw.plaintext, ...extra }, remaining());
+          break;
+        } catch (error) {
+          // A just-selected editor can lag behind the scripting snapshot.
+          // Refresh only reads, under the original deadline; never replay writes.
+          if (command !== 'read' || error.message !== 'CONFLICT' || attempt === 1) throw error;
+        }
+      }
       const result = snapshot(id, value);
       if (command !== 'read' && !result.tagsComplete) throw new Error('TAG_WRITE_INCOMPLETE');
       if (command !== 'read' && result.headingsComplete === false) throw new Error('HEADING_FORMAT_FAILED');

@@ -35,3 +35,38 @@ test('创建后的原生标签缺失返回失败，不能把正文中的井号�
   });
   await assert.rejects(bridge({ ...scope, command: 'create', title: 'PGTD OKR 日志', body: '<div>#O1 合成目标</div>' }), /TAG_WRITE_INCOMPLETE/);
 });
+
+test('切换笔记后编辑器尚未同步，重新取得快照再只读核对', async () => {
+  let shows = 0;
+  const bridge = createNotesBridge({
+    script: async input => { assert.equal(input.command, 'show'); return { id: 'note-1', plaintext: ++shows === 1 ? '旧快照' : '同步后的内容' }; },
+    editor: async input => {
+      assert.equal(input.command, 'read');
+      if (input.rawPlaintext === '旧快照') throw new Error('CONFLICT');
+      return { plaintext: '同步后的内容', nativeTags: [] };
+    },
+  });
+  assert.equal((await bridge({ ...scope, command: 'read' })).plaintext, '同步后的内容');
+  assert.equal(shows, 2);
+});
+
+test('持续读取冲突最多核对两次，写入冲突不重试', async () => {
+  let reads = 0, writes = 0;
+  const bridge = createNotesBridge({
+    script: async () => ({ id: 'note-1', plaintext: '原文' }),
+    editor: async input => {
+      if (input.command === 'read') {
+        reads++;
+        if (!writes) throw new Error('CONFLICT');
+        return { plaintext: '原文', nativeTags: [] };
+      }
+      writes++;
+      throw new Error('CONFLICT');
+    },
+  });
+  await assert.rejects(bridge({ ...scope, command: 'read' }), /CONFLICT/);
+  assert.equal(reads, 2);
+  writes = 1;
+  await assert.rejects(bridge({ ...scope, command: 'append', expectedBody: '<div>原文</div>', addition: '<div>新增</div>' }), /CONFLICT/);
+  assert.equal(writes, 2);
+});
