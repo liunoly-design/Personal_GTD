@@ -166,7 +166,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
             : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
             : '请保留原消息，核对备忘录后再继续。';
           const operation = ['bind', 'find', 'create', 'read', 'append', 'replace'].includes(error.operation) ? error.operation : 'unknown';
-          store.set('okr-error:' + hash([event.senderId, event.conversationId, event.id]), { code, operation, at: now() });
+          store.set('okr-error:' + hash([event.senderId, event.conversationId, event.id]), { code, operation, at: now?.() ?? new Date().toISOString() });
           result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。${explanation}` };
         }
       }

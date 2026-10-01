@@ -24,7 +24,7 @@ function fixture(t, options={}) {
     if(options.loseReply) throw new Error('response lost');return result;
   }};
   const make=()=>openFeishuCapture({stateDir:dir,config:{...scope,...options.config},reminders,feishu,notesBridge:options.notesBridge,okrGuide:options.okrGuide,
-    analyze:async args=>{calls++;return simulatedAnalysis(args);},now:()=> '2026-09-27T02:00:00Z'});
+    analyze:async args=>{calls++;return simulatedAnalysis(args);},now:options.defaultClock ? undefined : ()=> '2026-09-27T02:00:00Z'});
   let capture=make();
   t.after(async()=>{await capture.close();reminders.close();rmSync(dir,{recursive:true,force:true});});
   return {get capture(){return capture;},reminders,messages,sent,get reads(){return reads;},get calls(){return calls;},
@@ -326,7 +326,7 @@ test('OKR更新回复正文不一致或同ID改文时提示重发，不能重新
 });
 
 test('OKR 读取超时保留错误与操作阶段，不冒充权限错误', async t => {
-  const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes', noteId: 'n_test' } },
+  const f = fixture(t, { defaultClock: true, config: { okr: { account: 'iCloud', folder: 'Notes', noteId: 'n_test' } },
     notesBridge: async r => {
       if (r.command === 'bind') return { accountId: 'a_test', folderId: 'f_test' };
       throw new Error('APPLE_TIMEOUT');
