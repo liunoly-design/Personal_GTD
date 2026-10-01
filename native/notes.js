@@ -56,7 +56,7 @@ function run() {
           || !/PGTD-FINAL-[a-f0-9-]{36}/.test(input.body)) fail('INVALID_INPUT');
         note.body = input.body;
       }
-      value = snapshot(note);
+      value = input.command === 'read' || input.command === 'show' ? before : snapshot(note);
     } else fail('INVALID_INPUT');
     return JSON.stringify({ ok: true, value: value });
   } catch (error) {

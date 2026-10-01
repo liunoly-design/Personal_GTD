@@ -70,3 +70,18 @@ test('持续读取冲突最多核对两次，写入冲突不重试', async () =>
   await assert.rejects(bridge({ ...scope, command: 'append', expectedBody: '<div>原文</div>', addition: '<div>新增</div>' }), /CONFLICT/);
   assert.equal(writes, 2);
 });
+
+test('较长 OKR 日志默认保留足够的有界读取预算，显式短预算仍生效', async () => {
+  const budgets = [];
+  const bridge = createNotesBridge({
+    script: async () => ({ id: 'note-1', plaintext: '日志' }),
+    editor: async (_input, remainingMs) => {
+      budgets.push(remainingMs);
+      if (remainingMs < 25000) throw new Error('APPLE_TIMEOUT');
+      return { plaintext: '日志', nativeTags: [] };
+    },
+  });
+  assert.equal((await bridge({ ...scope, command: 'read' })).plaintext, '日志');
+  assert.ok(budgets[0] >= 25000 && budgets[0] <= 60000);
+  await assert.rejects(bridge({ ...scope, command: 'read' }, { timeoutMs: 15000 }), /APPLE_TIMEOUT/);
+});

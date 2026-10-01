@@ -53,7 +53,8 @@ async function withDesktop(fn) {
 }
 
 export function createNotesBridge({ script: scriptBridge = callNotesScript, editor = ui } = {}) {
-  return async function execute(request, { timeoutMs = 15000 } = {}) {
+  return async function execute(request, { timeoutMs = 60000 } = {}) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) throw new Error('INVALID_BUDGET');
     if (request.command === 'bind') return scriptBridge(request, { timeoutMs });
     const deadline = Date.now() + timeoutMs;
     const remaining = () => { const n = deadline - Date.now(); if (n <= 0) throw new Error('APPLE_TIMEOUT'); return n; };
