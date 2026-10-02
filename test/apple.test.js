@@ -102,3 +102,18 @@ test('插件复制目录缺少runtime时使用显式绝对helper路径完成只�
   assert.deepEqual(await apple.queryTasks({ limit: 20, offset: 0 }), value);
   assert.throws(() => openCaptured({ statePath: join(dir, 'bad.sqlite'), sourceId: 'S', helperPath: 'relative-helper' }), /absolute/i);
 });
+
+test('Apple显式列表查询不发送默认ID或改收集绑定，未绑定也能查询', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pgtd-explicit-list-'));
+  const requests = [];
+  const bridge = async r => { requests.push(r); return r.command === 'lists' ? { lists: [] } : r.command === 'boundList' ? { id: 'inbox', name: 'Inbox', sourceId: 'S' }
+    : { state: 'ok', list: { id: 'work', name: '工作', sourceId: 'S' }, items: [], total: 0, hasMore: false }; };
+  const apple = openAppleReminders({ statePath: join(dir, 'bound.sqlite'), sourceId: 'S', listId: 'inbox', bridge });
+  const unbound = openAppleReminders({ statePath: join(dir, 'unbound.sqlite'), sourceId: 'S', bridge });
+  t.after(() => { apple.close(); unbound.close(); rmSync(dir, { recursive: true, force: true }); });
+  assert.equal((await apple.queryTasks({ limit: 20, offset: 0, listName: '工作' })).list.id, 'work');
+  assert.deepEqual(requests[0], { command: 'queryTasks', sourceId: 'S', listName: '工作', limit: 20, offset: 0 });
+  assert.equal((await apple.listLists())[0].id, 'inbox');
+  assert.equal((await unbound.queryTasks({ limit: 20, offset: 0, listName: '工作' })).list.id, 'work');
+  assert.equal((await unbound.listLists())[0]?.id, undefined);
+});

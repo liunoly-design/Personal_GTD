@@ -25,11 +25,14 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       const record = store.get('operation:' + id);
       return record ? { state: 'applied', value: record.value } : { state: 'absent' };
     },
-    async queryTasks({ limit, offset }) {
+    async queryTasks({ limit, offset, listName }) {
       const binding = store.get('query-binding');
       const lists = store.entries('list:').map(([, value]) => value);
-      if (!binding) return { state: 'needs_list', candidates: lists };
-      const list = lists.find(list => list.id === binding);
+      const matches = listName === undefined ? null : lists.filter(list => list.name.toLowerCase() === listName.toLowerCase());
+      if (matches?.length === 0) return { state: 'list_not_found' };
+      if (matches?.length > 1) return { state: 'ambiguous_list', candidates: matches };
+      if (listName === undefined && !binding) return { state: 'needs_list', candidates: lists };
+      const list = matches ? matches[0] : lists.find(list => list.id === binding);
       if (!list) throw new Error('List unavailable');
       const all = store.entries('item:').map(([, value]) => value).filter(item => item.listId === list.id);
       if (all.length > 10000) throw new Error('Query capacity');

@@ -64,9 +64,24 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
     if command == "queryTasks" {
         guard let limit = input["limit"] as? Int, (1...50).contains(limit),
               let offset = input["offset"] as? Int, (0...4950).contains(offset) else { throw BridgeError(code: "INVALID_INPUT") }
-        let listId = try string(input, "listId")
-        guard let list = store.calendar(withIdentifier: listId), list.allowedEntityTypes.contains(.reminder),
-              list.source.sourceIdentifier == sourceId else { throw BridgeError(code: "LIST_UNAVAILABLE") }
+        let list: EKCalendar
+        if input["listName"] != nil {
+            let name = try string(input, "listName")
+            guard name.count <= 200, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw BridgeError(code: "INVALID_INPUT") }
+            let matches = store.calendars(for: .reminder).filter {
+                $0.source.sourceIdentifier == sourceId && $0.title.compare(name, options: .caseInsensitive) == .orderedSame
+            }
+            if matches.isEmpty { return ["state": "list_not_found"] }
+            if matches.count > 1 { return ["state": "ambiguous_list", "candidates": matches.map(listValue)] }
+            list = matches[0]
+        } else {
+            let id = try string(input, "listId")
+            guard let bound = store.calendar(withIdentifier: id), bound.allowedEntityTypes.contains(.reminder),
+                  bound.source.sourceIdentifier == sourceId else { throw BridgeError(code: "LIST_UNAVAILABLE") }
+            list = bound
+        }
+        let listId = list.calendarIdentifier
         // EventKit fetches a complete list; cap before returning a bounded page, never mutate objects.
         let all = try await reminders(list)
         guard all.count <= 10000 else { throw BridgeError(code: "QUERY_CAPACITY") }

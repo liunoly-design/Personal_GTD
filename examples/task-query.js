@@ -55,6 +55,12 @@ try {
   assert.equal(f.sent.length, 2);
   assert.equal(f.calls, 0);
   assert.equal((await f.reminders.listItems()).length, 5);
-  console.log(JSON.stringify({ mode: 'simulation', seeded: 5, unfinished: 4, pages: 2, receipts: f.sent.length,
+  const work = await f.reminders.createList('工作', 'demo-work-list');
+  await f.reminders.createItem({ listId: work.id, title: '合成工作任务' }, 'demo-work-item');
+  const selected = await dispatch(f, 'om_demo_work', '小婕 gtd 查询工作列表的任务');
+  assert.equal(selected.scope.listId, work.id);
+  assert.equal(selected.total, 1);
+  assert.equal((await dispatch(f, 'om_demo_missing', '小婕 gtd 查询不存在列表的任务')).status, 'query_list_not_found');
+  console.log(JSON.stringify({ mode: 'simulation', seeded: 6, unfinished: 5, pages: 2, selectedListItems: selected.total, receipts: f.sent.length,
     modelCalls: f.calls, queryWrites: 0, realAppleReads: 0, realFeishuSends: 0, durationMs: Math.round(performance.now() - started) }));
 } finally { for (const cleanup of cleanups) await cleanup(); }

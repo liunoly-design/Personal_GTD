@@ -158,3 +158,90 @@ test('礼貌前缀下的否定查询与别名额外筛选均保持只读保护',
   assert.equal((await f.reminders.listItems()).length, 0);
   assert.equal(f.calls, 0);
 });
+
+test('指定列表只读查询另一列表，默认查询和新收集保留原绑定', async t => {
+  const f = fixture(t, { config: { queryPageSize: 1 } });
+  const work = await f.reminders.createList('工作', 'list-work');
+  await f.reminders.createItem({ listId: work.id, title: '合成工作一' }, 'work-1');
+  await f.reminders.createItem({ listId: work.id, title: '合成工作二' }, 'work-2');
+  await f.reminders.createItem({ listId: work.id, title: '完成工作', completed: true }, 'work-done');
+  const inbox = await f.reminders.createList('Inbox', 'list-inbox');
+  await f.reminders.createItem({ listId: inbox.id, title: '合成默认事项' }, 'inbox-1');
+  const r = await dispatch(f, 'om_work', '小婕 gtd 查询工作列表的任务');
+  assert.equal(r.status, 'tasks_found');
+  assert.equal(r.scope.listId, work.id);
+  assert.equal(r.total, 2);
+  assert.match(r.receipt, /查询「工作」列表的任务 第 2 页/);
+  await f.restart();
+  assert.deepEqual(await dispatch(f, 'om_work', '小婕 gtd 查询工作列表的任务'), r);
+  const next = await dispatch(f, 'om_work2', '小婕 gtd 查询「工作」列表的任务 第 2 页');
+  assert.equal(next.scope.listId, work.id);
+  assert.notEqual(next.items[0].id, r.items[0].id);
+  assert.equal((await dispatch(f, 'om_default_after_work', '小婕 gtd 查询任务')).scope.listId, inbox.id);
+  assert.equal(f.calls, 0);
+  await dispatch(f, 'om_collect_after_work', '小婕 gtd 收集：合成默认新事项');
+  assert.equal((await f.reminders.listItems()).at(-1).listId, inbox.id);
+});
+
+test('指定列表缺失、同名与未绑定分别说明，不创建列表或改变默认位置', async t => {
+  const f = fixture(t);
+  const empty = await f.reminders.createList('工作', 'empty-work');
+  assert.equal((await dispatch(f, 'om_empty_work', '小婕 gtd 查看工作列表的任务')).status, 'tasks_empty');
+  assert.equal((await dispatch(f, 'om_default_unbound', '小婕 gtd 查询任务')).status, 'query_needs_list');
+  const missing = await dispatch(f, 'om_missing_work', '小婕 gtd 查询不存在列表的任务');
+  assert.equal(missing.status, 'query_list_not_found');
+  assert.match(missing.receipt, /没有找到「不存在」/);
+  await f.reminders.createList('工作', 'duplicate-work');
+  const duplicate = await dispatch(f, 'om_dup_work', '小婕 gtd 查一下工作列表的任务');
+  assert.equal(duplicate.status, 'query_needs_list');
+  assert.equal(duplicate.candidates.length, 2);
+  assert.ok(duplicate.candidates.some(c => c.id === empty.id));
+  assert.match(duplicate.receipt, /多个/);
+  assert.doesNotMatch(duplicate.receipt, /listId|sim-list/);
+  assert.equal((await f.reminders.listLists()).length, 2);
+  assert.equal((await f.reminders.listItems()).length, 0);
+  assert.equal(f.calls, 0);
+});
+
+test('指定列表同义、引号与大小写可用，全部列表和附加筛选不误收集', async t => {
+  const f = fixture(t);
+  await f.reminders.createList('Work', 'english-work');
+  const special = await f.reminders.createList('研发，A 列表', 'special-work');
+  for (const [i, text] of ['查询Work列表的任务', '请帮我查看work列表里的未完成事项', '查询列表 Work 的任务',
+    '看看「Work」里的任务', '查一下“Work”中的待办', '查询"Work"列表的任务'].entries()) {
+    assert.equal((await dispatch(f, 'om_name' + i, '小婕 gtd ' + text)).status, 'tasks_empty', text);
+  }
+  assert.equal((await dispatch(f, 'om_special_name', '小婕 gtd 查询「研发，A 列表」列表的任务')).scope.listId, special.id);
+  for (const [i, text] of ['查询所有列表的任务', '查询全部列表的任务', '不要查询Work列表的任务', '“查询Work列表的任务”',
+    '查询Work列表的任务并收集牛奶', '查询Work列表今天到期的任务', '查询关于金山的任务', '查询「Work」列表的任务 第0页'].entries()) {
+    const r = await dispatch(f, 'om_name_guard' + i, '小婕 gtd ' + text);
+    assert.ok(['gtd_unsupported', 'needs_instruction', 'query_failed'].includes(r.status), text);
+  }
+  assert.equal(f.calls, 0);
+  assert.equal((await f.reminders.listItems()).length, 0);
+});
+
+test('指定列表读取跨账户响应被拒绝，长名称不传入读取边界', async t => {
+  const f = fixture(t, { config: { sourceId: 'authorized-source' } });
+  let reads = 0;
+  f.reminders.queryTasks = async () => { reads++; return { state: 'ok', list: { id: 'other', sourceId: 'foreign-source', name: '工作' },
+    items: [], total: 0, hasMore: false }; };
+  assert.equal((await dispatch(f, 'om_foreign_list', '小婕 gtd 查询工作列表的任务')).status, 'query_failed');
+  assert.equal((await dispatch(f, 'om_long_list', '小婕 gtd 查询' + '名'.repeat(201) + '列表的任务')).status, 'gtd_unsupported');
+  assert.equal(reads, 1);
+  assert.equal(f.calls, 0);
+});
+
+test('含引号符号的列表下一页命令仍能查询同一真实列表', async t => {
+  const f = fixture(t, { config: { queryPageSize: 1 } });
+  const list = await f.reminders.createList('A」B', 'quoted-symbol-list');
+  await f.reminders.createItem({ listId: list.id, title: '合成一' }, 'quoted-symbol-one');
+  await f.reminders.createItem({ listId: list.id, title: '合成二' }, 'quoted-symbol-two');
+  const first = await dispatch(f, 'om_quote_page1', '小婕 gtd 查询"A」B"列表的任务');
+  assert.equal(first.status, 'tasks_found');
+  const command = first.receipt.split('还有更多，发送：')[1];
+  const second = await dispatch(f, 'om_quote_page2', command);
+  assert.equal(second.status, 'tasks_found');
+  assert.equal(second.scope.listId, list.id);
+  assert.notEqual(first.items[0].id, second.items[0].id);
+});
