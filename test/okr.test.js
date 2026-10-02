@@ -99,12 +99,21 @@ test('超长或无效输入在 Apple 访问前拒绝，长预览明确标注截�
   assert.match((await f.session.handle(event('7', 'open'))).receipt, /仅显示末尾/);
 });
 
+test('长期讨论日志超过旧正文上限仍能记录，不丢失既有历史', async t => {
+  const f = fixture(t);
+  await f.session.handle(event('1', 'open'));
+  f.notes[0].body = 'x'.repeat(40000); f.notes[0].plaintext = f.notes[0].body;
+  assert.equal((await f.session.handle(event('2', 'record', '合成后续回答'))).status, 'okr_saved');
+  assert.ok(f.notes[0].body.startsWith('x'.repeat(40000)));
+  assert.match(f.notes[0].body, /合成后续回答/);
+});
+
 test('笔记达到容量时拒绝新增记录并保留原文', async t => {
   const f = fixture(t);
   await f.session.handle(event('1', 'open'));
-  f.notes[0].body = 'x'.repeat(32760); f.notes[0].plaintext = f.notes[0].body;
+  f.notes[0].body = 'x'.repeat(65530); f.notes[0].plaintext = f.notes[0].body;
   await assert.rejects(f.session.handle(event('2', 'record', '不能挤掉旧记录')), /CAPACITY_EXCEEDED/);
-  assert.equal(f.notes[0].body.length, 32760);
+  assert.equal(f.notes[0].body.length, 65530);
 });
 
 test('创建结果未核实时不补建；追加未知或人工冲突阻止后续写入', async t => {

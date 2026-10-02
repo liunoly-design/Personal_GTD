@@ -20,7 +20,7 @@ func editor(_ e:AXUIElement,_ depth:Int=0)->AXUIElement? {
     return nil
 }
 func value(_ e:AXUIElement) throws -> String {
-    guard let s=get(e,kAXValueAttribute) as? String,s.utf16.count<=32768 else {try fail("UNSUPPORTED_NOTE")}
+    guard let s=get(e,kAXValueAttribute) as? String,s.utf16.count<=65536 else {try fail("UNSUPPORTED_NOTE")}
     return s
 }
 func read(_ e:AXUIElement) throws -> (String,[String]) {
@@ -28,7 +28,7 @@ func read(_ e:AXUIElement) throws -> (String,[String]) {
     let raw=text as NSString
     var offsets:[Int]=[]
     for i in 0..<raw.length where raw.character(at:i)==0xfffc {offsets.append(i)}
-    guard offsets.count<=128 else {try fail("UNSUPPORTED_NOTE")}
+    guard offsets.count<=512 else {try fail("UNSUPPORTED_NOTE")}
     var replacements:[(Int,String)]=[]
     // Notes virtualizes offscreen attachments. Select each exact character range
     // to expose its native AXAttachment instead of guessing from screen order.
@@ -102,7 +102,7 @@ func headingStyle(_ e:AXUIElement,_ range:NSRange)->String? {
 }
 func formatHeadings(_ e:AXUIElement,_ root:AXUIElement,_ app:NSRunningApplication) throws {
     let before=try value(e);let headings=headingRanges(before)
-    guard headings.count<=128 else {try fail("CAPACITY_EXCEEDED")}
+    guard headings.count<=512 else {try fail("CAPACITY_EXCEEDED")}
     func find(_ node:AXUIElement,_ names:[String],_ depth:Int=0)->AXUIElement? {
         if depth>6{return nil}
         if get(node,kAXRoleAttribute) as? String == "AXMenuItem",let name=get(node,kAXTitleAttribute) as? String,names.contains(name){return node}
@@ -156,9 +156,14 @@ func run() throws -> [String:Any] {
             }
             let raw=try value(e) as NSString
             let resultingLength = (command == "append" ? current.0.utf16.count : 0)+desired.utf16.count
-            guard resultingLength<=32768 else {try fail("CAPACITY_EXCEEDED")}
-            try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length))
+            guard resultingLength<=65536 else {try fail("CAPACITY_EXCEEDED")}
             let target=command == "append" ? current.0+desired : desired
+            // Check structural limits before any paste, including repeated history headings.
+            guard headingRanges(target).count<=512 else {try fail("CAPACITY_EXCEEDED")}
+            let prospective=try NSRegularExpression(pattern:"(?<![\\p{L}\\p{N}_])#(?:O|KR)[0-9]+(?![\\p{L}\\p{N}_-])")
+            let tokens=prospective.matches(in:target,range:NSRange(location:0,length:(target as NSString).length)).map{(target as NSString).substring(with:$0.range)}
+            guard Set(tokens+(input["preserveTags"] as? [String] ?? [])).count<=32 else {try fail("CAPACITY_EXCEEDED")}
+            try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length))
             try paste(desired,app)
             current=try read(e)
             guard trim(current.0)==trim(target) else {try fail("WRITE_RESULT_UNKNOWN")}

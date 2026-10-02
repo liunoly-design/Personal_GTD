@@ -14,7 +14,7 @@ export async function publishOkr({ store, call, binding, logNote, key, fingerpri
     const marker = 'PGTD-FINAL-' + randomUUID();
     const addition = `<div>${html(sentAt)} 用户确认定稿（更新请求；当前内容见最新稿）</div><div>旧版：${html(before?.plaintext ?? '首次定稿')}</div><div>确认稿：${html(draft.text)}</div><div>${marker}</div>`;
     const body = `<div>PGTD OKR 最新稿</div><div>${html(draft.text)}</div><div>${marker}</div>`;
-    if ((logNote.body + addition).length > 32768 || body.length > 32768) throw new Error('CAPACITY_EXCEEDED');
+    if ((logNote.body + addition).length > 65536 || body.length > 65536) throw new Error('CAPACITY_EXCEEDED');
     op = { key, fingerprint, marker, title: 'PGTD OKR 最新稿', body, text: draft.text, addition,
       logId: logNote.id, logBody: logNote.body, logPlaintext: logNote.plaintext.trim(),
       latestId: latest?.id, latestBody: before?.body, phase: 'log-new' };

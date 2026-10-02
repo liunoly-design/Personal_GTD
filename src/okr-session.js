@@ -157,7 +157,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
         result.receipt += '\n请核对以上完整草案，回复此消息“确认定稿”后更新最新完整稿；也可回复修改意见。';
       }
       const addition = `<div>${html(event.sentAt)}</div><div>${html(entryText)}</div><div>${marker}</div>`;
-      if ((note.body + addition).length > 32768) throw new Error('CAPACITY_EXCEEDED');
+      if ((note.body + addition).length > 65536) throw new Error('CAPACITY_EXCEEDED');
       const beforePlaintext = note.plaintext.trim();
       store.set('pending', { key, fingerprint, marker, text: entryText, beforePlaintext, result, discussion, draft, clearDraft: true, sessionKey });
       await call({ ...request('append'), noteId: state.noteId, expectedBody: note.body,

@@ -13,7 +13,7 @@ function run() {
     function snapshot(note) {
       if (note.passwordProtected() || note.shared() || note.attachments.length > 0) fail('UNSUPPORTED_NOTE');
       var body = note.body();
-      if (body.length > 32768) fail('CAPACITY_EXCEEDED');
+      if (body.length > 131072) fail('CAPACITY_EXCEEDED');
       return { id: note.id(), body: body, plaintext: note.plaintext() };
     }
     if (input.command === 'bind') {
@@ -31,7 +31,7 @@ function run() {
       var probeTitle = /^PGTD F101 合成测试 PGTD-F101-[a-f0-9-]{36}$/.test(input.title);
       var okrTitle = input.title === 'PGTD OKR 日志' && /PGTD-OKR-[a-f0-9-]{36}/.test(input.body);
       var finalTitle = input.title === 'PGTD OKR 最新稿' && /PGTD-FINAL-[a-f0-9-]{36}/.test(input.body);
-      if ((!probeTitle && !okrTitle && !finalTitle) || typeof input.body !== 'string' || input.body.length > 32768) fail('INVALID_INPUT');
+      if ((!probeTitle && !okrTitle && !finalTitle) || typeof input.body !== 'string' || input.body.length > 131072) fail('INVALID_INPUT');
       var note = app.Note({ body: input.body });
       folder.notes.push(note);
       value = snapshot(note);
@@ -46,12 +46,12 @@ function run() {
       if (['append', 'replace'].indexOf(input.command) >= 0 && before.plaintext.indexOf('\ufffc') >= 0) fail('UNSUPPORTED_NOTE');
       if (input.command === 'append') {
         if (before.body !== input.expectedBody) fail('CONFLICT');
-        if ((before.body + input.addition).length > 32768) fail('CAPACITY_EXCEEDED');
+        if ((before.body + input.addition).length > 131072) fail('CAPACITY_EXCEEDED');
         note.body = before.body + input.addition;
       }
       if (input.command === 'replace') {
         if (before.body !== input.expectedBody) fail('CONFLICT');
-        if (typeof input.body !== 'string' || input.body.length > 32768
+        if (typeof input.body !== 'string' || input.body.length > 131072
           || input.body.indexOf('<div>PGTD OKR 最新稿</div>') !== 0
           || !/PGTD-FINAL-[a-f0-9-]{36}/.test(input.body)) fail('INVALID_INPUT');
         note.body = input.body;

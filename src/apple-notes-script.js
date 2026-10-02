@@ -19,7 +19,7 @@ export function callNotesScript(request, { timeoutMs = 15000 } = {}) {
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
       output += chunk;
-      if (Buffer.byteLength(output) > 262144) { child.kill('SIGKILL'); finish(new Error('RESPONSE_TOO_LARGE')); }
+      if (Buffer.byteLength(output) > 1048576) { child.kill('SIGKILL'); finish(new Error('RESPONSE_TOO_LARGE')); }
     });
     child.on('close', () => {
       try {
