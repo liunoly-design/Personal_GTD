@@ -38,10 +38,10 @@ export function openAppleReminders({ statePath, sourceId, listId, bridge = callA
   if (typeof sourceId !== 'string' || !sourceId) throw new Error('Apple source ID required');
   const store = openOperationStore(statePath);
   const saved = store.get('binding');
-  if (saved && (saved.sourceId !== sourceId || (listId && saved.listId !== listId))) {
+  if (saved && (saved.sourceId !== sourceId || (listId && saved.listId && saved.listId !== listId))) {
     store.close(); throw new Error('Apple binding changed; keep the original operation directory');
   }
-  store.set('binding', saved ?? { sourceId, ...(listId ? { listId } : {}) });
+  store.set('binding', { ...(saved ?? { sourceId }), ...(listId ? { listId } : {}) });
   function remember(value) {
     if (value?.id && value.listId) store.set('item:' + value.id, { listId: value.listId });
     return value;
@@ -56,6 +56,15 @@ export function openAppleReminders({ statePath, sourceId, listId, bridge = callA
     return remember(await bridge(request, options));
   }
   return {
+    async queryTasks({ limit, offset }, options) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50 || !Number.isSafeInteger(offset) || offset < 0 || offset > 4950) {
+        throw new Error('Invalid query pagination');
+      }
+      const binding = store.get('binding');
+      const boundId = binding.listId ?? listId;
+      if (!boundId) return { state: 'needs_list', candidates: (await bridge({ command: 'lists', sourceId }, options)).lists };
+      return bridge({ command: 'queryTasks', sourceId, listId: boundId, limit, offset }, options);
+    },
     async listLists(options) {
       const binding = store.get('binding');
       if (binding.listId) {

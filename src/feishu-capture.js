@@ -1,3 +1,4 @@
+import { taskQuery, queryTasks, validateQueryConfig } from './actions/query-tasks.js';
 import { openOkrSession } from './okr-session.js';
 import { explicitEntry, okrInstruction, validateEntryActivation, gtdGuard, legacyOkrInstruction } from './explicit-entries.js';
 import { createHash } from 'node:crypto';
@@ -8,6 +9,7 @@ import { openDurableCapture } from './durable-capture.js';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function validateFeishuScope(config) {
   validateEntryActivation(config.activation);
+  validateQueryConfig(config);
   for (const name of ['accountId', 'entryAgentId']) {
     if (typeof config[name] !== 'string' || !config[name].trim()) throw new Error('Explicit scope required');
   }
@@ -183,6 +185,10 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
           result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。${explanation}` };
         }
       }
+    } else if (entry?.module === 'gtd' && taskQuery(command)) {
+      result = await queryTasks({ reminders, config, ...taskQuery(command), now, signal: options().signal });
+      store.set('routed-result:' + id, { event, result });
+      return deliverRouted(event, result);
     } else result = await capture.handle(event);
     if (result.draftVersion) store.set('source:' + id, { ...store.get('source:' + id), draftVersion: result.draftVersion });
     if (['review_unavailable', 'okr_unavailable', 'okr_help'].includes(result.status)) {

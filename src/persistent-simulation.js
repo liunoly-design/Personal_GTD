@@ -25,6 +25,19 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       const record = store.get('operation:' + id);
       return record ? { state: 'applied', value: record.value } : { state: 'absent' };
     },
+    async queryTasks({ limit, offset }) {
+      const binding = store.get('query-binding');
+      const lists = store.entries('list:').map(([, value]) => value);
+      if (!binding) return { state: 'needs_list', candidates: lists };
+      const list = lists.find(list => list.id === binding);
+      if (!list) throw new Error('List unavailable');
+      const all = store.entries('item:').map(([, value]) => value).filter(item => item.listId === list.id);
+      if (all.length > 10000) throw new Error('Query capacity');
+      const items = all.filter(item => item.listId === list.id && !item.completed)
+        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      return { state: 'ok', list: { ...list, sourceId: 'sim-source' }, total: items.length, hasMore: offset + limit < items.length,
+        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false })) };
+    },
     async listLists() { return store.entries('list:').map(([, value]) => value); },
     async listItems() { return store.entries('item:').map(([, value]) => value); },
     async listReceipts() { return store.entries('receipt:').map(([, value]) => value); },
@@ -41,6 +54,7 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
         if (!store.get('list:' + input.listId)) throw new Error('Missing list');
         const value = { ...input, id: 'sim-item-' + randomUUID(), remindAt: null };
         store.set('item:' + value.id, value);
+        store.set('query-binding', input.listId);
         return value;
       });
     },

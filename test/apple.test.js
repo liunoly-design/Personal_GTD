@@ -48,3 +48,39 @@ test('Apple 无法核实时停止写入，权限拒绝不声称保存成功', as
   assert.equal((await capture.recover())[0].status, 'result_unknown');
   assert.equal(writes, 1);
 });
+
+test('Apple查询只读绑定列表，未绑定返回同名候选不自动选择或创建', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pgtd-query-apple-'));
+  const requests = [];
+  const bridge = async input => {
+    requests.push(input);
+    if (input.command === 'lists') return { lists: [{ id: 'L1', name: 'Inbox' }, { id: 'L2', name: 'Inbox' }] };
+    if (input.command === 'queryTasks') return { state: 'ok', list: { id: 'L1', name: 'Inbox', sourceId: 'S' },
+      items: [{ id: 'manual-item', listId: 'L1', title: '人工任务', completed: false }], total: 1, hasMore: false };
+    throw new Error('Write forbidden');
+  };
+  let apple = openAppleReminders({ statePath: join(dir, 'apple.sqlite'), sourceId: 'S', bridge });
+  t.after(() => { apple.close(); rmSync(dir, { recursive: true, force: true }); });
+  assert.deepEqual(await apple.queryTasks({ limit: 20, offset: 0 }), { state: 'needs_list', candidates: [{ id: 'L1', name: 'Inbox' }, { id: 'L2', name: 'Inbox' }] });
+  apple.close();
+  apple = openAppleReminders({ statePath: join(dir, 'bound.sqlite'), sourceId: 'S', listId: 'L1', bridge });
+  assert.equal((await apple.queryTasks({ limit: 20, offset: 0 })).items[0].id, 'manual-item');
+  assert.deepEqual(requests[1], { command: 'queryTasks', sourceId: 'S', listId: 'L1', limit: 20, offset: 0 });
+  await assert.rejects(apple.queryTasks({ limit: 51, offset: 0 }), /Invalid query/);
+  assert.equal(requests.length, 2);
+});
+
+test('未绑定查询提示后可显式配置列表，同一已绑定目录不允许换目标', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pgtd-query-config-'));
+  const bridge = async r => r.command === 'lists' ? { lists: [{ id: 'L', name: 'Inbox' }] }
+    : { state: 'ok', list: { id: r.listId, name: 'Inbox', sourceId: 'S' }, items: [], total: 0, hasMore: false };
+  let apple = openAppleReminders({ statePath: join(dir, 'adapter.sqlite'), sourceId: 'S', bridge });
+  t.after(() => { apple?.close(); rmSync(dir, { recursive: true, force: true }); });
+  assert.equal((await apple.queryTasks({ limit: 20, offset: 0 })).state, 'needs_list');
+  apple.close();
+  apple = openAppleReminders({ statePath: join(dir, 'adapter.sqlite'), sourceId: 'S', listId: 'L', bridge });
+  assert.equal((await apple.queryTasks({ limit: 20, offset: 0 })).list.id, 'L');
+  apple.close();
+  apple = undefined;
+  assert.throws(() => openAppleReminders({ statePath: join(dir, 'adapter.sqlite'), sourceId: 'S', listId: 'other', bridge }), /binding changed/);
+});

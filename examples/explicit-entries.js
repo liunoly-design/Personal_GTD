@@ -74,7 +74,10 @@ if (!stage) {
       const receipts = data.receipts.length;
       await send('om_review', '小婕review 注册周复盘');
       assert.equal(data.receipts.length, receipts);
-      assert.equal((await send('om_query', '小婕 gtd 查询任务')).status, 'gtd_unsupported');
+      const query = await send('om_query', '小婕 gtd 查询任务');
+      assert.equal(query.status, 'tasks_found');
+      assert.equal(query.total, 2);
+      assert.equal(query.items.length, 2);
       assert.equal((await capture.recover()).length, 0);
       assert.equal(data.notes.length, 1);
       assert.equal(data.notes[0].body.split('合成旧回答').length, 2);

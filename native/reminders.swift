@@ -61,6 +61,24 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
         try store.saveCalendar(list, commit: true)
         return listValue(list)
     }
+    if command == "queryTasks" {
+        guard let limit = input["limit"] as? Int, (1...50).contains(limit),
+              let offset = input["offset"] as? Int, (0...4950).contains(offset) else { throw BridgeError(code: "INVALID_INPUT") }
+        let listId = try string(input, "listId")
+        guard let list = store.calendar(withIdentifier: listId), list.allowedEntityTypes.contains(.reminder),
+              list.source.sourceIdentifier == sourceId else { throw BridgeError(code: "LIST_UNAVAILABLE") }
+        // EventKit fetches a complete list; cap before returning a bounded page, never mutate objects.
+        let all = try await reminders(list)
+        guard all.count <= 10000 else { throw BridgeError(code: "QUERY_CAPACITY") }
+        let unfinished = all.filter { !$0.isCompleted }.sorted { $0.calendarItemIdentifier < $1.calendarItemIdentifier }
+        let items = unfinished.dropFirst(offset).prefix(limit).map { item in
+            return ["id": item.calendarItemIdentifier, "listId": listId,
+                    "title": String((item.title ?? "").prefix(200)) + ((item.title ?? "").count > 200 ? "…（标题省略）" : ""),
+                    "completed": false] as [String: Any]
+        }
+        return ["state": "ok", "list": listValue(list), "items": items,
+                "total": unfinished.count, "hasMore": offset + limit < unfinished.count]
+    }
     let list = try calendar(input)
     if command == "boundList" { return listValue(list) }
     if command == "createItem" || command == "findCreate" {

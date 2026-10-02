@@ -50,3 +50,9 @@ npm run start:apple -- --config runtime/apple/config.json --state-dir runtime/ap
 合成条目保留供用户检查，本程序未删除。`deploy/verify-apple.js --write-synthetic` 会真实写入三条样例，仅用于首次验收；事件 ID 固定，重跑时不会默默覆盖此前请求。
 
 参考：[Apple EventKit 访问权限](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)、[EKEventStore](https://developer.apple.com/documentation/eventkit/ekeventstore)。
+
+## F108/T01 只读查询增量（2026-10-02）
+
+新增 helper `queryTasks` 只读取已绑定 source/list 的未完成事项，包含人工创建且没有 PGTD 标记的事项；只返回标题、完成状态及真实引用，不返回备注。此范围不同于历史 `getItem` 的 PGTD 标记限制，写入/提醒核对仍沿用原限制。无绑定返回候选供配置，已有绑定不允许换目标；只读列表不要求可写。
+
+`npm run verify:query -- --read-inbox --config /absolute/private/config.json` 需要明确目标读取授权及已编译新版 helper。只输出范围、数量和引用，不发送飞书、不写 Apple、不使用付费模型或修改适配器数据库。真实字段/权限/同步及飞书闭环本轮未测，Swift类型检查和合成桥接不代替真实验收。代码与可执行验证入口已交付，本轮未重新编译替换运行 helper、重启网关或变更现有权限。
