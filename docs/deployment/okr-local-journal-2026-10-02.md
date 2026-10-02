@@ -25,3 +25,9 @@ Notes有两个窗口，首窗口无编辑器，第二窗口有。桥接改为最
 1. 发送“小婕 okr 续接”，核对当前稿与问题。
 2. 回复问题，检查本地日志新增一轮，Notes只更新当前稿。
 3. 形成待确认稿后回复该草案“确认定稿”，检查archive、最新稿更新和讨论稿收起；重投或重启不应重复写入。
+
+## 最终部署检查
+
+代码3689682、修复e80fc53。最终source为 /Users/mac/.openclaw/personal-gtd/releases/okr-local-journal-e80fc53/openclaw/index.js。该快照完整168项测试、语法检查与Swift类型检查通过；工程176项测试通过。网关新进程运行、RPC正常，飞书running=true、probe.ok=true、lastError=null，插件loaded且source正确。
+
+local-initialized=true，pending、local-projection、publication均为空。journal.md为42303字节、0600；次数200、金额5美元。没有新增模型探针或发送飞书消息。未推送远端。保留旧快照与私有备份；回退不能整份覆盖宿主配置，须保留其他插件并核对Notes与状态，不能盲目回滚外部笔记。
