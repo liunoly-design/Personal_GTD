@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { isAbsolute } from 'node:path';
 import { openOperationStore } from './operation-store.js';
 
 const binary = fileURLToPath(new URL('../runtime/bin/pgtd-reminders', import.meta.url));
-export function callApple(input, { signal, timeoutMs = 15000 } = {}) {
+export function callApple(input, { signal, timeoutMs = 15000, helperPath = binary } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'ignore'], signal });
+    const child = spawn(helperPath, [], { stdio: ['pipe', 'pipe', 'ignore'], signal });
     let output = ''; let settled = false;
     const timer = setTimeout(() => { child.kill(); finish(new Error('Apple timeout')); }, timeoutMs);
     function finish(error, value) {
@@ -34,7 +35,8 @@ export function callApple(input, { signal, timeoutMs = 15000 } = {}) {
   });
 }
 
-export function openAppleReminders({ statePath, sourceId, listId, bridge = callApple }) {
+export function openAppleReminders({ statePath, sourceId, listId, helperPath, bridge = (input, options) => callApple(input, { ...options, helperPath }) }) {
+  if (helperPath !== undefined && !isAbsolute(helperPath)) throw new Error('Absolute Apple helper path required');
   if (typeof sourceId !== 'string' || !sourceId) throw new Error('Apple source ID required');
   const store = openOperationStore(statePath);
   const saved = store.get('binding');

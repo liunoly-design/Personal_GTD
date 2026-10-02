@@ -332,3 +332,6 @@ npm run verify:query -- --read-inbox --config /absolute/private/config.json
 `小婕 okr 讨论/续接` 和关联回复继续使用；不需要压缩命令。讨论稿每轮替换，不累积历史；模型仅使用讨论摘要、当前草案和最多 3000 字符的本地日志片段，不加载整份历史。回复当前待确认草案“确认定稿”后，先归档、再更新同一“PGTD OKR 最新稿”，确认结果成功后收起讨论稿。暂停不删除任何文件。
 
 本地日志上限 16 MiB；文件被删改、Notes 人工修改或写入结果未知时停止并核对，不覆盖历史或重复调用模型。未设置 `okr.journalDir` 的模拟和既有部署继续使用原日志模式。验证：`npm run test:okr`、`npm test`、`npm run check` 和 macOS 上 `swiftc -typecheck native/notes-tags.swift`。
+
+
+F108 部署修复：OpenClaw 会复制插件到临时目录，私有运行配置现在必须设置 `remindersHelperPath` 为已编译 helper 的绝对路径（例如本机仓库下 `runtime/bin/pgtd-reminders` 的绝对路径）。缺少或使用相对路径时拒绝启动。已在真实网关中验证读取成功；此前失败消息仍复用旧结果，请发送一条新查询验证回执。详见 [helper 定位修复](.scratch/f108-task-query/issues/02-helper-path.md)。

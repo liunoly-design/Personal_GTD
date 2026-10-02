@@ -1,4 +1,5 @@
 {
+  "remindersHelperPath": "/ABSOLUTE/PRIVATE/runtime/bin/pgtd-reminders",
   "sourceId": "REPLACE_WITH_APPLE_SOURCE_ID",
   "listId": "REPLACE_WITH_APPLE_INBOX_ID",
   "authAgent": "gtd",

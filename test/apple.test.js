@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, copyFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { openAppleReminders } from '../src/apple-reminders.js';
 import { openDurableCapture } from '../src/durable-capture.js';
 import { simulatedAnalysis } from '../src/simulation.js';
@@ -83,4 +84,21 @@ test('未绑定查询提示后可显式配置列表，同一已绑定目录不�
   apple.close();
   apple = undefined;
   assert.throws(() => openAppleReminders({ statePath: join(dir, 'adapter.sqlite'), sourceId: 'S', listId: 'other', bridge }), /binding changed/);
+});
+
+test('插件复制目录缺少runtime时使用显式绝对helper路径完成只读查询', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pgtd-captured-plugin-'));
+  const src = join(dir, 'captured', 'src');
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(dir, 'captured', 'package.json'), '{"type":"module"}');
+  for (const name of ['apple-reminders.js', 'operation-store.js']) copyFileSync(new URL('../src/' + name, import.meta.url), join(src, name));
+  const helperPath = join(dir, 'authorized-helper');
+  const value = { state: 'ok', list: { id: 'L', sourceId: 'S', name: 'Inbox' },
+    items: [{ id: 'manual-1', listId: 'L', title: '合成任务', completed: false }], total: 1, hasMore: false };
+  writeFileSync(helperPath, '#!' + process.execPath + '\nlet text="";process.stdin.on("data",d=>text+=d);process.stdin.on("end",()=>{const r=JSON.parse(text);if(r.command!=="queryTasks"||r.sourceId!=="S"||r.listId!=="L"||r.limit!==20||r.offset!==0)process.exit(2);console.log(' + JSON.stringify(JSON.stringify({ ok: true, value })) + ');});\n', { mode: 0o700 });
+  const { openAppleReminders: openCaptured } = await import(pathToFileURL(join(src, 'apple-reminders.js')));
+  const apple = openCaptured({ statePath: join(dir, 'state.sqlite'), sourceId: 'S', listId: 'L', helperPath });
+  t.after(() => { apple.close(); rmSync(dir, { recursive: true, force: true }); });
+  assert.deepEqual(await apple.queryTasks({ limit: 20, offset: 0 }), value);
+  assert.throws(() => openCaptured({ statePath: join(dir, 'bad.sqlite'), sourceId: 'S', helperPath: 'relative-helper' }), /absolute/i);
 });

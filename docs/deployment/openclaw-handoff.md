@@ -44,6 +44,7 @@ npm run openclaw:check -- --agent gtd
 | allowedConversationIds | 实际聊天的 `oc_...` chat_id；私聊也填写 chat_id，不能填用户 ID |
 | stateDir | 固定的绝对目录，建议 `runtime/feishu/state`；不得与运行中的 CLI 共用，不得删除后重试 |
 | runtimeConfigPath | 私有运行配置文件的绝对路径 |
+| remindersHelperPath | 已编译且有授权的 `runtime/bin/pgtd-reminders` 绝对路径；OpenClaw会复制插件到临时目录，不能依赖模块相对路径 |
 | sourceId / listId | 从本机 `runtime/apple/config.json` 复用已绑定默认账户 Inbox 的真实 ID |
 | usagePath | 复用 `runtime/model/usage.sqlite` 的绝对路径，保留此前费用，不新建账本重置预算 |
 | model | 沿用 Gemini 配置与已有累计预算；模板金额只是配置示例，不是新的授权 |

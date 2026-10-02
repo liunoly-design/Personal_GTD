@@ -12,7 +12,7 @@ const config = JSON.parse(await readFile(path, 'utf8'));
 if (!config.sourceId || !config.listId) throw new Error('Explicit authorized sourceId and listId required');
 validateQueryConfig(config);
 const result = await queryTasks({ config, page: 1, reminders: {
-  queryTasks: (page, options) => callApple({ command: 'queryTasks', sourceId: config.sourceId, listId: config.listId, ...page }, options),
+  queryTasks: (page, options) => callApple({ command: 'queryTasks', sourceId: config.sourceId, listId: config.listId, ...page }, { ...options, helperPath: config.remindersHelperPath }),
 } });
 // Avoid printing private task titles; inspect them via the trusted user query after deployment.
 console.log(JSON.stringify({ status: result.status, code: result.code, scope: result.scope, readAt: result.readAt,
