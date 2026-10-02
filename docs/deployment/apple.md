@@ -56,3 +56,7 @@ npm run start:apple -- --config runtime/apple/config.json --state-dir runtime/ap
 新增 helper `queryTasks` 只读取已绑定 source/list 的未完成事项，包含人工创建且没有 PGTD 标记的事项；只返回标题、完成状态及真实引用，不返回备注。此范围不同于历史 `getItem` 的 PGTD 标记限制，写入/提醒核对仍沿用原限制。无绑定返回候选供配置，已有绑定不允许换目标；只读列表不要求可写。
 
 `npm run verify:query -- --read-inbox --config /absolute/private/config.json` 需要明确目标读取授权及已编译新版 helper。只输出范围、数量和引用，不发送飞书、不写 Apple、不使用付费模型或修改适配器数据库。真实字段/权限/同步及飞书闭环本轮未测，Swift类型检查和合成桥接不代替真实验收。代码与可执行验证入口已交付，本轮未重新编译替换运行 helper、重启网关或变更现有权限。
+
+## 2026-10-02 授权后续：真实读取与部署
+
+用户明确授权继续及Inbox读取。新快照176项测试及语法检查通过，真实已绑定Inbox两次只读查询均返回7条未完成事项及7引用。新helper编译/签名、备份、快照切换和网关重启完成；实际插件loaded、RPC成功、飞书probe成功。用户新消息闭环及真实容量/故障仍待验证，不替代原始未测限制。详见[部署证据](f108-task-query-2026-10-02.md)。没有新增Apple写入、代发飞书、模型调用或定时任务。
