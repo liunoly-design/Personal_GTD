@@ -14,6 +14,12 @@ const title = value => {
   const chars = [...String(value ?? '').replace(/[\r\n\x00-\x1f]/gu, ' ')];
   return chars.slice(0, 200).join('') + (chars.length > 200 ? '…（标题省略）' : '');
 };
+function queryTime(readAt, timeZone = 'Asia/Shanghai') {
+  const parts = new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'long' }).formatToParts(new Date(readAt));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}（${timeZone === 'Asia/Shanghai' ? '北京时间' : values.timeZoneName}）`;
+}
 export async function queryTasks({ reminders, config, page, now, signal }) {
   if (!Number.isSafeInteger(page) || page < 1 || page > 100) return {
     status: 'query_failed', code: 'INVALID_PAGE', receipt: '任务查询页码须为 1–100；未读取或创建事项。',
@@ -38,8 +44,8 @@ export async function queryTasks({ reminders, config, page, now, signal }) {
         if (!safeId(list.id)) throw new Error('Invalid list');
         return { id: list.id, name: title(list.name) };
       });
-      return { status: 'query_needs_list', candidates, receipt: '任务查询尚未配置 Inbox 列表，请先在私有配置中确认真实列表 ID；本次未创建列表或事项。'
-        + candidates.map(list => `\n${list.name} [listId: ${list.id}]`).join('')
+      return { status: 'query_needs_list', candidates, receipt: '还没有确定要查询的列表，请先确认目标列表。'
+        + candidates.map((list, index) => `\n${index + 1}. ${list.name}`).join('')
         + (response.candidates.length > 50 ? '\n候选超过50个，仅展示前50个。' : '') };
     }
     const { list, items, total, hasMore } = response;
@@ -54,10 +60,12 @@ export async function queryTasks({ reminders, config, page, now, signal }) {
     const readAt = now?.() ?? new Date().toISOString();
     const status = total === 0 ? 'tasks_empty' : visible.length === 0 ? 'tasks_page_empty' : 'tasks_found';
     return { status, scope, readAt, page, pageSize, total, hasMore, items: visible,
-      receipt: `任务查询范围：${scope.listName}，未完成事项；第 ${page} 页，每页 ${pageSize} 条，共 ${total} 条。\n读取时间：${readAt}\nsourceId: ${scope.sourceId}\nlistId: ${scope.listId}`
-        + (status === 'tasks_empty' ? '\n没有未完成事项。' : status === 'tasks_page_empty' ? '\n本页为空，请查看前面的页码。'
-          : visible.map(item => `\n- ${item.title} [itemId: ${item.id}]`).join(''))
-        + (hasMore ? `\n还有下一页：小婕 gtd 查询任务 第 ${page + 1} 页${page === 100 ? '（超出本版页码范围，请缩小列表后查询）' : ''}` : '') };
+      receipt: `${scope.listName} · 未完成 ${total} 项`
+        + (hasMore || page > 1 ? `\n第 ${page} 页` : '')
+        + (status === 'tasks_empty' ? '\n\n没有未完成事项。' : status === 'tasks_page_empty' ? '\n\n本页没有事项，请查看前面的页码。'
+          : '\n\n' + visible.map((item, index) => `${(page - 1) * pageSize + index + 1}. ${item.title}`).join('\n'))
+        + `\n\n查询时间：${queryTime(readAt, config.timeZone)}`
+        + (hasMore ? page < 100 ? `\n还有更多，发送：小婕 gtd 查询任务 第 ${page + 1} 页` : '\n还有更多事项，已达到查询页数上限。' : '') };
   } catch (error) {
     const denied = error?.reason === 'PERMISSION_DENIED' || error?.code === 'PERMISSION_DENIED';
     const timeout = error?.code === 'QUERY_TIMEOUT';

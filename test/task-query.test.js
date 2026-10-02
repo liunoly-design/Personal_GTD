@@ -47,7 +47,9 @@ test('查询默认Inbox未完成任务，返回真实引用且不写入或调用
   assert.ok(result.items[0].id);
   assert.equal(result.readAt, '2026-09-27T02:00:00Z');
   assert.match(result.receipt, /未完成/);
-  assert.match(result.receipt, /合成人工任务/);
+  assert.match(result.receipt, /1\. 合成人工任务/);
+  assert.match(result.receipt, /2026-09-27 10:00（北京时间）/);
+  assert.doesNotMatch(result.receipt, /sourceId|listId|itemId|sim-item-|sim-list-|T02:00:00Z|每页/);
   assert.doesNotMatch(JSON.stringify(result), /私人备注不返回/);
   assert.equal((await f.reminders.listItems()).length, 1);
   assert.equal(f.calls, 0);
