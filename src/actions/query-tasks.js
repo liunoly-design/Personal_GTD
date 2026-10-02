@@ -4,7 +4,7 @@ export function taskQuery(instruction) {
   if (match) return { page: Number(match[1] ?? 1) };
   const prefix = '^(?:请)?(?:帮我)?(?:查询|查看|查一下|看看|看一下|列出(?:来)?|找一下)\\s*';
   const suffix = '(?:未完成)?(?:任务|事项|待办)(?:\\s*第\\s*(?<page>[0-9]+)\\s*页)?[？?。]?$';
-  for (const shape of ['(?<name>.+?)列表(?:的|里(?:的)?|中(?:的)?)?', '列表\\s*(?<name>.+?)\\s*的', '(?<name>「[^」]+」|“[^”]+”|"[^"]+")\\s*(?:里|中)(?:的)?']) {
+  for (const shape of ['(?<name>.+?)列表(?:的|里(?:面)?(?:的)?|中(?:的)?)?', '列表\\s*(?<name>.+?)\\s*的', '(?<name>.+?)\\s*(?:里(?:面)?|中)(?:的)?']) {
     const selected = instruction.trim().match(new RegExp(prefix + shape + suffix, 'u'));
     if (!selected) continue;
     let name = selected.groups.name.trim();

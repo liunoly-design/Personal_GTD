@@ -245,3 +245,20 @@ test('含引号符号的列表下一页命令仍能查询同一真实列表', as
   assert.equal(second.scope.listId, list.id);
   assert.notEqual(first.items[0].id, second.items[0].id);
 });
+
+test('自然表达查询 waiting 里面的任务，无引号且默认绑定不变', async t => {
+  const f = fixture(t);
+  const inbox = await f.reminders.createList('Inbox', 'natural-inbox');
+  const waiting = await f.reminders.createList('waiting', 'natural-waiting');
+  await f.reminders.createItem({listId:waiting.id,title:'等待合成任务'},'natural-item');
+  await f.reminders.createItem({listId:inbox.id,title:'默认合成任务'},'natural-default');
+  for (const [i, text] of ['查询 waiting 里面的任务','查看waiting里的未完成任务','看看 waiting 中的待办','查询waiting列表里面的任务'].entries()) {
+    const r = await dispatch(f,'om_natural_'+i,'小婕 gtd '+text);
+    assert.equal(r.status,'tasks_found',text);
+    assert.equal(r.scope.listId,waiting.id);
+    assert.equal(r.items[0].title,'等待合成任务');
+  }
+  assert.equal((await dispatch(f,'om_natural_default','小婕 gtd 查询任务')).scope.listId,inbox.id);
+  assert.equal((await f.reminders.listItems()).length,2);
+  assert.equal(f.calls,0);
+});
