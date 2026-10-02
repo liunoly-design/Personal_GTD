@@ -557,3 +557,21 @@ test('本地模式备忘录被人工修改时保留修改并停止分析和替�
   await assert.rejects(f.session.handle(event('answer', 'record', '停止')), /CONFLICT/);
   assert.equal(f.notes[0].body, before); assert.equal(calls, 0);
 });
+
+test('迁移后模型仍收到最近未分析原回答，Notes不重新累积历史', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-recent-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t, { guide: async () => { throw new Error('MODEL_TIMEOUT'); } });
+  await f.session.handle(event('old-open', 'open'));
+  await f.session.handle(event('old-answer', 'record', '合成基线为零，必须保留用于续接'));
+  let context;
+  await f.restart({ config: { ...f.options.config, journalDir }, guide: async args => {
+    context = args;
+    return { stage: 'direction', summary: '合成事实', advice: '合成建议', questions: ['下一步？'], draft: null };
+  } });
+  await f.session.handle(event('migration', 'open'));
+  assert.doesNotMatch(f.notes[0].plaintext, /合成基线为零/);
+  await f.session.handle(event('new-answer', 'record', '请继续'));
+  assert.match(context.recentLog, /合成基线为零/);
+  assert.ok(context.recentLog.length <= 3000);
+});

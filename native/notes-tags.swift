@@ -135,9 +135,18 @@ func run() throws -> [String:Any] {
     guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Notes").first else {try fail("EDITOR_UNAVAILABLE")}
     let root=AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(root,1)
-    guard let w=(get(root,kAXWindowsAttribute) as? [AXUIElement])?.first,let e=editor(w) else {try fail("EDITOR_UNAVAILABLE")}
+    let windows=get(root,kAXWindowsAttribute) as? [AXUIElement] ?? []
+    guard windows.count<=16 else {try fail("EDITOR_UNAVAILABLE")}
+    let editors=windows.compactMap{editor($0)}
+    guard !editors.isEmpty else {try fail("EDITOR_UNAVAILABLE")}
     func trim(_ s:String)->String{s.trimmingCharacters(in:.newlines)}
-    guard trim(try value(e))==trim(expectedRaw) else {try fail("CONFLICT")}
+    // Notes can put a utility/empty window first. Select only the unique editor
+    // matching the ID-bound scripting snapshot; never guess by window order.
+    let matching=editors.filter{candidate in
+        guard let text=try? value(candidate) else {return false}
+        return trim(text)==trim(expectedRaw)
+    }
+    guard matching.count==1,let e=matching.first else {try fail("CONFLICT")}
     var current=try read(e)
     if command != "read" {
         app.activate();Thread.sleep(forTimeInterval:0.1);try front(app)

@@ -60,6 +60,12 @@ export function openOkrJournal({ directory, store }) {
       if (existing === null) atomic(path, text);
       return path;
     },
+    recent() {
+      recover();
+      const current = read(path), known = store.get('journal-hash');
+      if (!known || current === null || hash(current) !== known) throw new Error('CONFLICT');
+      return { text: current.slice(-3000), truncated: current.length > 3000 };
+    },
     verify() {
       recover();
       const current = read(path), known = store.get('journal-hash');

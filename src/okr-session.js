@@ -141,6 +141,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
       const latestBinding = store.get('latest');
       const latest = guide && latestBinding ? await call({ ...request('read'), noteId: latestBinding.id }) : null;
       if (guide) {
+        const recent = journal ? journal.recent() : { text: note.plaintext.slice(-3000), truncated: note.plaintext.length > 3000 };
         const analysisKey = 'analysis:' + key;
         const oldAnalysis = store.get(analysisKey);
         if (oldAnalysis?.value) {
@@ -157,7 +158,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
               Promise.resolve().then(() => guide({ stage: current.stage, workingDraft: current.workingDraft ?? null, answer: event.text,
                 discussionSummary: current.summary ?? null, lastQuestion: current.lastQuestion ?? null, sentAt: event.sentAt,
                 currentGoals: latest?.plaintext.slice(0, 8000) ?? '', goalsTruncated: (latest?.plaintext.length ?? 0) > 8000,
-                recentLog: note.plaintext.slice(-3000), logTruncated: note.plaintext.length > 3000,
+                recentLog: recent.text, logTruncated: recent.truncated,
                 signal: controller.signal })),
               new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('MODEL_TIMEOUT')); }, guideTimeoutMs); }),
             ]);
