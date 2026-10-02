@@ -52,8 +52,8 @@ function run() {
       if (input.command === 'replace') {
         if (before.body !== input.expectedBody) fail('CONFLICT');
         if (typeof input.body !== 'string' || input.body.length > 131072
-          || input.body.indexOf('<div>PGTD OKR 最新稿</div>') !== 0
-          || !/PGTD-FINAL-[a-f0-9-]{36}/.test(input.body)) fail('INVALID_INPUT');
+          || !((input.body.indexOf('<div>PGTD OKR 最新稿</div>') === 0 && /PGTD-FINAL-[a-f0-9-]{36}/.test(input.body))
+            || (input.body.indexOf('<div>PGTD OKR 讨论稿<br>') === 0 && /PGTD-OKR-[a-f0-9-]{36}/.test(input.body)))) fail('INVALID_INPUT');
         note.body = input.body;
       }
       value = input.command === 'read' || input.command === 'show' ? before : snapshot(note);

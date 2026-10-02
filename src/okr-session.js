@@ -1,3 +1,4 @@
+import { openOkrJournal } from './okr-journal.js';
 import { validateOkrStep } from './okr-structure.js';
 import { publishOkr } from './okr-publish.js';
 import { validateGuidance, guidanceText, stages } from './okr-guidance.js';
@@ -14,6 +15,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     || (config.noteId !== undefined && (typeof config.noteId !== 'string' || !config.noteId))) throw new Error('INVALID_LOCATION');
   const store = openOperationStore(statePath);
   const token = randomUUID();
+  let journal = null;
   try {
     store.transaction(() => {
       const owner = store.get('owner');
@@ -22,7 +24,13 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
         try { process.kill(owner.pid, 0); } catch (e) { if (e.code === 'ESRCH') alive = false; }
         if (alive) throw new Error('STATE_IN_USE');
       }
-      if (store.get('config') && hash(store.get('config')) !== hash(config)) throw new Error('BINDING_CHANGED');
+      const previousConfig = store.get('config');
+      if (previousConfig && hash(previousConfig) !== hash(config)) {
+        const { journalDir, ...withoutJournal } = config;
+        if (!journalDir || previousConfig.journalDir || hash(previousConfig) !== hash(withoutJournal)
+          || store.get('pending') || store.get('publication')) throw new Error('BINDING_CHANGED');
+      }
+      if (config.journalDir) journal = openOkrJournal({ directory: config.journalDir, store });
       store.set('config', config);
       store.set('owner', { pid: process.pid, token });
     });
@@ -83,27 +91,52 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     if (note.id !== state.noteId || typeof note.body !== 'string' || typeof note.plaintext !== 'string') throw new Error('READBACK_FAILED');
     const pending = store.get('pending');
     if (pending) {
+      if (pending.local) journal?.verify();
       if (note.tagsComplete === false || note.headingsComplete === false || !note.plaintext.includes(pending.marker) || !note.plaintext.includes(pending.text)
-        || !note.plaintext.includes(pending.beforePlaintext)) throw new Error('UPDATE_RESULT_UNKNOWN');
+        || (!pending.local && !note.plaintext.includes(pending.beforePlaintext))
+        || (pending.local && note.plaintext.trim() !== pending.projectionText.trim())) throw new Error('UPDATE_RESULT_UNKNOWN');
       store.transaction(() => {
         store.set(pending.key, { fingerprint: pending.fingerprint, result: pending.result });
         if (pending.discussion) store.set('discussion:' + pending.sessionKey, pending.discussion);
         if (pending.clearDraft) store.set('draft', pending.draft);
+        if (pending.local) store.set('local-note-body', note.body);
         store.set('pending', null);
       });
       if (pending.key === key) return pending.result;
+    }
+    if (journal) {
+      const projection = store.get('local-projection');
+      if (projection) {
+        if (note.tagsComplete === false || note.headingsComplete === false || note.plaintext.trim() !== projection.text.trim()) throw new Error('UPDATE_RESULT_UNKNOWN');
+        store.transaction(() => { store.set('local-projection', null); store.set('local-initialized', true); store.set('local-note-body', note.body); });
+      }
+      if (!store.get('local-initialized')) {
+        const progress = store.get('discussion:' + sessionKey);
+        const original = '# 原备忘录讨论日志完整归档\n\n' + note.plaintext;
+        journal.archive('legacy-log:' + state.noteId, original);
+        journal.append('legacy-log:' + state.noteId, original);
+        const text = `PGTD OKR 讨论稿\n${state.marker}\n${progress?.summary ?? '待继续讨论'}\n${progress?.lastQuestion ?? ''}\n${progress?.workingDraft ?? ''}\n${(note.nativeTags ?? []).filter(tag => !/^#(?:O|KR)[0-9]+$/.test(tag)).join(' ')}`;
+        store.set('local-projection', { text });
+        await call({ ...request('replace'), noteId: state.noteId, expectedBody: note.body, body: `<div>${html(text)}</div>` });
+        note = await call({ ...request('read'), noteId: state.noteId });
+        if (note.tagsComplete === false || note.headingsComplete === false || note.plaintext.trim() !== text.trim()) throw new Error('READBACK_FAILED');
+        store.transaction(() => { store.set('local-projection', null); store.set('local-initialized', true); store.set('local-note-body', note.body); });
+      }
+      journal.verify();
+      const savedBody = store.get('local-note-body');
+      if (savedBody && savedBody !== note.body && !store.get('publication')) throw new Error('CONFLICT');
     }
     if (event.action === 'confirm') {
       const draft = store.get('draft');
       if (!draft || draft.owner !== sessionKey || draft.version !== event.confirmVersion) {
         return finish({ status: 'okr_needs_confirmation', receipt: '请回复当前完整草案的消息“确认定稿”；旧草案或其他会话的确认不能使用。' });
       }
-      const result = await publishOkr({ store, call, binding: state, logNote: note, key, fingerprint, draft, sentAt: event.sentAt });
-      store.transaction(() => { finish(result); store.set('draft', null); store.set('publication', null); });
+      const result = await publishOkr({ store, call, binding: state, logNote: note, key, fingerprint, draft, sentAt: event.sentAt, journal, discussion: store.get('discussion:' + sessionKey) });
+      store.transaction(() => { finish(result); store.set('draft', null); store.set('publication', null); if (journal) store.set('discussion:' + sessionKey, null); });
       return result;
     }
     if (event.action === 'record') {
-      const marker = 'PGTD-ENTRY-' + randomUUID();
+      const marker = 'PGTD-ENTRY-' + (journal ? hash(key).slice(0, 32).replace(/^(........)(....)(....)(....)(............)$/u, '$1-$2-$3-$4-$5') : randomUUID());
       let analysis, discussion, guidanceFailure, draft = null;
       const latestBinding = store.get('latest');
       const latest = guide && latestBinding ? await call({ ...request('read'), noteId: latestBinding.id }) : null;
@@ -149,35 +182,42 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
         ? '已保存原回答。模型本轮试图同时改动多项目标或关键结果，未更新草案或推进讨论。你可以一次提供多个想法；我们接下来只讨论一项。请回复新消息，明确“先只讨论当前目标的某一个 KR”，并说明你希望先完善哪一项。'
         : '已保存原回答，本轮分析未完成。可稍后用新消息继续；同一消息不会重复调用模型。';
       const entryText = guide ? event.text + '\n' + (analysis ? guidanceText(analysis) : failureText) : event.text;
-      const result = { status: guide ? analysis ? 'okr_guided' : 'okr_guidance_failed' : 'okr_saved', noteId: note.id, receipt: '已保存到 OKR 日志。回复此消息可继续记录；启动 OKR 讨论可回看。' };
+      const result = { status: guide ? analysis ? 'okr_guided' : 'okr_guidance_failed' : 'okr_saved', noteId: note.id, receipt: journal ? '已保存到本地 OKR Markdown 日志，并更新当前讨论稿。回复此消息可继续。' : '已保存到 OKR 日志。回复此消息可继续记录；启动 OKR 讨论可回看。' };
       if (guidanceFailure) result.guidanceFailure = guidanceFailure;
       if (guide) result.receipt = analysis ? '已记录。\n' + guidanceText(analysis) : failureText;
       if (draft) {
         result.draftVersion = draft.version;
         result.receipt += '\n请核对以上完整草案，回复此消息“确认定稿”后更新最新完整稿；也可回复修改意见。';
       }
-      const addition = `<div>${html(event.sentAt)}</div><div>${html(entryText)}</div><div>${marker}</div>`;
-      if ((note.body + addition).length > 65536) throw new Error('CAPACITY_EXCEEDED');
+      const logText = `${event.sentAt}\n${entryText}\n${marker}`;
+      const currentProgress = discussion ?? store.get('discussion:' + sessionKey);
+      const preservedDraft = !analysis?.draft && currentProgress?.workingDraft ? '\n## 当前工作草案（待确认）\n' + currentProgress.workingDraft : '';
+      const preservedContext = !analysis && currentProgress ? `\n已确认事实与待确认：${currentProgress.summary ?? ''}\n当前问题：${currentProgress.lastQuestion ?? ''}` : '';
+      const projectionText = `PGTD OKR 讨论稿\n${state.marker}\n${logText}${preservedContext}${preservedDraft}\n${(note.nativeTags ?? []).filter(tag => !/^#(?:O|KR)[0-9]+$/.test(tag)).join(' ')}`;
+      const addition = journal ? `<div>${html(projectionText)}</div>` : `<div>${html(event.sentAt)}</div><div>${html(entryText)}</div><div>${marker}</div>`;
+      if (journal) journal.append(marker, logText);
+      if ((journal ? addition : note.body + addition).length > 65536) throw new Error('CAPACITY_EXCEEDED');
       const beforePlaintext = note.plaintext.trim();
-      store.set('pending', { key, fingerprint, marker, text: entryText, beforePlaintext, result, discussion, draft, clearDraft: true, sessionKey });
-      await call({ ...request('append'), noteId: state.noteId, expectedBody: note.body,
-        addition });
+      store.set('pending', { key, fingerprint, marker, text: entryText, beforePlaintext, result, discussion, draft, clearDraft: true, sessionKey, local: Boolean(journal), ...(journal ? { projectionText } : {}) });
+      await call({ ...request(journal ? 'replace' : 'append'), noteId: state.noteId, expectedBody: note.body,
+        ...(journal ? { body: addition } : { addition }) });
       note = await call({ ...request('read'), noteId: state.noteId });
       if (note.tagsComplete === false || note.headingsComplete === false || note.id !== state.noteId || !note.plaintext.includes(marker) || !note.plaintext.includes(entryText)
-        || !note.plaintext.includes(beforePlaintext)) throw new Error('READBACK_FAILED');
-      store.transaction(() => { finish(result); if (discussion) store.set('discussion:' + sessionKey, discussion); store.set('draft', draft); store.set('pending', null); });
+        || (!journal && !note.plaintext.includes(beforePlaintext))
+        || (journal && note.plaintext.trim() !== projectionText.trim())) throw new Error('READBACK_FAILED');
+      store.transaction(() => { finish(result); if (discussion) store.set('discussion:' + sessionKey, discussion); store.set('draft', draft); store.set('pending', null); if (journal) store.set('local-note-body', note.body); });
       return result;
     }
     store.set(sessionKey, true);
     const clean = text => text.replace(/PGTD-(?:ENTRY|OKR|FINAL)-[a-f0-9-]{36}/gu, '').trim();
-    const preview = clean(note.plaintext);
+    const preview = journal ? '' : clean(note.plaintext);
     const latestBinding = store.get('latest');
     const latest = latestBinding ? await call({ ...request('read'), noteId: latestBinding.id }) : null;
     const progress = store.get('discussion:' + sessionKey);
     const resume = progress?.workingDraft ? '\n当前工作草案（待确认）：\n' + progress.workingDraft : '';
     const current = latest ? '\n当前目标：\n' + clean(latest.plaintext).slice(0, 3000) + (latest.plaintext.length > 3000 ? '\n（当前目标预览截断，完整内容在最新稿）' : '') : '';
     return finish({ status: 'okr_open', noteId: note.id,
-      receipt: `已进入 OKR 逐项讨论（grilling 模式）。先明确周期和个人情况，再讨论一个 O，并逐个讨论其 3–5 个 KR。每轮一个核心问题，回答后保存并继续。\n${progress?.lastQuestion ? "继续上一轮问题：" + progress.lastQuestion : progress?.workingDraft ? "请先核对下方工作草案，说明当前这一项需要补充或修改什么。" : "这次要制定或回顾哪个年度/季度？起止日期是什么？"}${resume}${current}\n最近日志：\n${preview.length > 3000 ? '（仅显示末尾 3000 字符，完整内容在备忘录）\n' : ''}${preview.slice(-3000)}` });
+      receipt: `已进入 OKR 逐项讨论（grilling 模式）。先明确周期和个人情况，再讨论一个 O，并逐个讨论其 3–5 个 KR。每轮一个核心问题，回答后保存并继续。\n${progress?.lastQuestion ? "继续上一轮问题：" + progress.lastQuestion : progress?.workingDraft ? "请先核对下方工作草案，说明当前这一项需要补充或修改什么。" : "这次要制定或回顾哪个年度/季度？起止日期是什么？"}${resume}${current}${journal ? '\n完整问答已保存在本地 Markdown，备忘录仅保留当前讨论稿。' : '\n最近日志：\n'}${preview.length > 3000 ? '（仅显示末尾 3000 字符，完整内容在备忘录）\n' : ''}${preview.slice(-3000)}` });
   }
   return {
     handle(event) {

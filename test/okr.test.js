@@ -1,7 +1,7 @@
 import {sampleDraft, sampleGuide} from '../examples/okr-sample.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openOkrSession } from '../src/okr-session.js';
@@ -419,4 +419,141 @@ test('草案尚未形成时重启仍保留已澄清事实和当前问题，不�
   await f.session.handle(event('second', 'record', '补充合成证据'));
   assert.match(received.discussionSummary, /旧目标为测试内容/);
   assert.equal(received.lastQuestion, '哪类客户问题已获得实际付费证据？');
+});
+
+
+test('本地日志模式保留逐轮原文，备忘录只保留最新讨论稿，重启重投不增长', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-journal-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir } });
+  await f.session.handle(event('local-open', 'open'));
+  await f.session.handle(event('local-1', 'record', '合成第一轮原始回答'));
+  await f.session.handle(event('local-2', 'record', '合成第二轮原始回答'));
+  const journal = readFileSync(join(journalDir, 'journal.md'), 'utf8');
+  assert.match(journal, /合成第一轮原始回答/);
+  assert.match(journal, /合成第二轮原始回答/);
+  assert.doesNotMatch(f.notes[0].plaintext, /合成第一轮原始回答/);
+  assert.match(f.notes[0].plaintext, /合成第二轮原始回答/);
+  const body = f.notes[0].body;
+  await f.restart();
+  await f.session.handle(event('local-2', 'record', '合成第二轮原始回答'));
+  assert.equal(f.notes[0].body, body);
+  assert.equal(readFileSync(join(journalDir, 'journal.md'), 'utf8'), journal);
+  assert.equal(f.notes.length, 1);
+});
+
+
+test('本地模式定稿先归档讨论稿和旧版本，结果成功后收起备忘录讨论稿', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-final-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir }, guide: stagedGuide() });
+  const ready = await readyDraft(f);
+  const confirmation = { ...event('local-confirm', 'confirm'), confirmVersion: ready.draftVersion };
+  const result = await f.session.handle(confirmation);
+  assert.equal(result.status, 'okr_finalized');
+  assert.match(f.notes[1].plaintext, /#O1 改善体力/);
+  assert.doesNotMatch(f.notes[0].plaintext, /#O1 改善体力/);
+  assert.match(f.notes[0].plaintext, /已定稿/);
+  const archives = readdirSync(join(journalDir, 'archive')).map(file => readFileSync(join(journalDir, 'archive', file), 'utf8'));
+  assert.ok(archives.some(text => text.includes('改善体力') && text.includes('讨论稿')));
+  await f.restart();
+  assert.deepEqual(await f.session.handle(confirmation), result);
+  assert.equal(f.notes.length, 2);
+  assert.equal(readdirSync(join(journalDir, 'archive')).length, archives.length);
+});
+
+
+test('启用本地模式先完整归档旧日志，保留笔记ID和当前讨论上下文', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-migrate-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t);
+  await f.session.handle(event('legacy-open', 'open'));
+  await f.session.handle(event('legacy-answer', 'record', '原始历史不可丢失'));
+  const oldId = f.notes[0].id, oldText = f.notes[0].plaintext;
+  await f.restart({ config: { ...f.options.config, journalDir } });
+  await f.session.handle(event('migrated-open', 'open'));
+  assert.equal(f.notes[0].id, oldId);
+  assert.match(f.notes[0].plaintext, /PGTD OKR 讨论稿/);
+  assert.doesNotMatch(f.notes[0].plaintext, /原始历史不可丢失/);
+  assert.ok(readFileSync(join(journalDir, 'journal.md'), 'utf8').includes(oldText));
+  assert.ok(readdirSync(join(journalDir, 'archive')).some(file => readFileSync(join(journalDir, 'archive', file), 'utf8').includes(oldText)));
+});
+
+test('本地日志已保存且Notes替换响应丢失，重启读回不重复写入或分析', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-unknown-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  let calls = 0, writes = 0;
+  const guide = async () => { calls++; return { stage: 'direction', summary: '合成事实', advice: '合成建议', questions: ['下一步？'], draft: null }; };
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir }, guide });
+  await f.session.handle(event('open', 'open'));
+  await f.restart({ bridge: async r => { const value = await f.bridge(r); if (r.command === 'replace') { writes++; throw new Error('APPLE_TIMEOUT'); } return value; } });
+  await assert.rejects(f.session.handle(event('answer', 'record', '只保留一次的合成回答')), /APPLE_TIMEOUT/);
+  const journal = readFileSync(join(journalDir, 'journal.md'), 'utf8');
+  await f.restart();
+  assert.equal((await f.session.handle(event('answer', 'record', '只保留一次的合成回答'))).status, 'okr_guided');
+  assert.equal(calls, 1); assert.equal(writes, 1);
+  assert.equal(readFileSync(join(journalDir, 'journal.md'), 'utf8'), journal);
+});
+
+test('本地日志被修改或丢失时停止，不覆盖修改或静默重建历史', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-conflict-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir } });
+  await f.session.handle(event('open', 'open'));
+  const before = f.notes[0].body;
+  rmSync(join(journalDir, 'journal.md'));
+  await assert.rejects(f.session.handle(event('answer', 'record', '停止')), /CONFLICT/);
+  assert.equal(f.notes[0].body, before);
+});
+
+
+test('本地定稿结果创建已落地但响应丢失，恢复后只归档一次并收起讨论稿', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-final-unknown-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir }, guide: stagedGuide() });
+  const ready = await readyDraft(f);
+  const confirmation = { ...event('final-unknown', 'confirm'), confirmVersion: ready.draftVersion };
+  await f.restart({ bridge: async r => { const value = await f.bridge(r); if (r.command === 'create') throw new Error('APPLE_TIMEOUT'); return value; } });
+  await assert.rejects(f.session.handle(confirmation), /APPLE_TIMEOUT/);
+  assert.equal(f.notes.length, 2);
+  const journal = readFileSync(join(journalDir, 'journal.md'), 'utf8');
+  const archiveCount = readdirSync(join(journalDir, 'archive')).length;
+  await f.restart();
+  assert.equal((await f.session.handle(confirmation)).status, 'okr_finalized');
+  assert.equal(f.notes.length, 2);
+  assert.match(f.notes[0].plaintext, /已定稿/);
+  assert.equal(readFileSync(join(journalDir, 'journal.md'), 'utf8'), journal);
+  assert.equal(readdirSync(join(journalDir, 'archive')).length, archiveCount);
+});
+
+test('定稿后收起讨论稿已落地但响应丢失，重启核对不再次覆盖', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-clear-unknown-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir }, guide: stagedGuide() });
+  const ready = await readyDraft(f);
+  const confirmation = { ...event('clear-unknown', 'confirm'), confirmVersion: ready.draftVersion };
+  let clears = 0;
+  await f.restart({ bridge: async r => {
+    const value = await f.bridge(r);
+    if (r.command === 'replace' && r.body.includes('讨论已定稿')) { clears++; throw new Error('APPLE_TIMEOUT'); }
+    return value;
+  } });
+  await assert.rejects(f.session.handle(confirmation), /APPLE_TIMEOUT/);
+  await f.restart();
+  assert.equal((await f.session.handle(confirmation)).status, 'okr_finalized');
+  assert.equal(clears, 1);
+});
+
+
+test('本地模式备忘录被人工修改时保留修改并停止分析和替换', async t => {
+  const journalDir = mkdtempSync(join(tmpdir(), 'pgtd-okr-note-conflict-'));
+  t.after(() => rmSync(journalDir, { recursive: true, force: true }));
+  let calls = 0;
+  const f = fixture(t, { config: { account: 'iCloud', folder: 'Notes', journalDir }, guide: () => { calls++; throw new Error('UNEXPECTED'); } });
+  await f.session.handle(event('open', 'open'));
+  f.notes[0].body += '<div>人工补充必须保留</div>';
+  f.notes[0].plaintext += '人工补充必须保留';
+  const before = f.notes[0].body;
+  await assert.rejects(f.session.handle(event('answer', 'record', '停止')), /CONFLICT/);
+  assert.equal(f.notes[0].body, before); assert.equal(calls, 0);
 });

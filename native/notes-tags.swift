@@ -146,7 +146,7 @@ func run() throws -> [String:Any] {
             let fragment=command == "formatCreated" ? current.0 : try htmlText(input["html"] as? String ?? "")
             var desired=fragment
             if command == "replace" {
-                guard desired.hasPrefix("PGTD OKR 最新稿\n"),desired.contains("PGTD-FINAL-") else {try fail("INVALID_INPUT")}
+                guard (desired.hasPrefix("PGTD OKR 最新稿\n") && desired.contains("PGTD-FINAL-")) || (desired.hasPrefix("PGTD OKR 讨论稿\n") && desired.contains("PGTD-OKR-")) else {try fail("INVALID_INPUT")}
                 let extras=input["preserveTags"] as? [String] ?? []
                 let extra=extras.filter{tag in
                     let pattern=NSRegularExpression.escapedPattern(for:tag)+"(?![\\p{L}\\p{N}_-])"
