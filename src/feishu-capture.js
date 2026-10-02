@@ -1,3 +1,4 @@
+import { selectionCandidate, taskSelection, selectTasks } from './actions/select-tasks.js';
 import { taskQuery, queryTasks, validateQueryConfig } from './actions/query-tasks.js';
 import { openOkrSession } from './okr-session.js';
 import { explicitEntry, okrInstruction, validateEntryActivation, gtdGuard, legacyOkrInstruction } from './explicit-entries.js';
@@ -35,7 +36,7 @@ export function acceptsFeishuContext(ctx, config) {
     && !ctx.SenderIsBot
     && config.allowedSenderIds.includes(ctx.SenderId) && config.allowedConversationIds.includes(ctx.NativeChannelId)
     && (activated(ctx.rawText ?? ctx.RawBody, config) || Boolean(ctx.ReplyToIdFull ?? ctx.ReplyToId)
-      || timeCandidate(ctx.rawText ?? ctx.RawBody));
+      || selectionCandidate(ctx.rawText ?? ctx.RawBody) || timeCandidate(ctx.rawText ?? ctx.RawBody));
 }
 export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now, notesBridge, okrGuide }) {
   config = structuredClone(config);
@@ -67,8 +68,10 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       store.transaction(() => {
         store.set('receipt:' + id, { hash: hash(input), value });
         const source = store.get('source:' + input.replyTo);
+        const query = store.get('routed-result:' + input.replyTo)?.result;
         store.set('reply:' + value.message_id, { ...source, conversationId: input.conversationId,
-          rootId: source?.rootId ?? input.replyTo });
+          rootId: source?.rootId ?? input.replyTo,
+          ...(query?.scope && Array.isArray(query.items) ? {queryEventId:input.replyTo} : {}) });
       });
       return value;
     },
@@ -100,6 +103,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const linked = store.get('reply:' + replyTo) ?? store.get('source:' + replyTo);
     if (!activated(ctx.rawText ?? ctx.RawBody, config)
       && !timeCandidate(ctx.rawText ?? ctx.RawBody)
+      && !selectionCandidate(ctx.rawText ?? ctx.RawBody)
       && !(linked?.senderId === ctx.SenderId && linked.conversationId === ctx.NativeChannelId)) return { status: 'not_handled' };
     const id = ctx.MessageSidFull ?? ctx.MessageSid;
     if (typeof id !== 'string' || !/^om_[\w-]+$/u.test(id)) return { status: 'invalid_source' };
@@ -119,6 +123,9 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     }
     const parentReceipt = store.get('reply:' + message.parent_id);
     const parent = parentReceipt ?? store.get('source:' + message.parent_id);
+    // Legacy query receipts copied their original event; maintenance receipts must not inherit it.
+    const queryEventId = parentReceipt?.queryEventId ?? (parentReceipt?.event?.id === parentReceipt?.rootId ? parentReceipt?.rootId : undefined);
+    const querySnapshot = queryEventId && store.get('routed-result:' + queryEventId)?.result;
     if (parent?.senderId === event.senderId && parent.conversationId === event.conversationId) event.replyTo = parent.rootId;
     const entry = explicitEntry(event.text, config.activation);
     const prefix = entry?.prefix ?? 0;
@@ -140,7 +147,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       }
     }
     const previousSource = store.get('source:' + id);
-    if (previousSource && (previousSource.textHash !== hash(event.text)
+    if (previousSource && (previousSource.providerReplyTo !== message.parent_id
+      || previousSource.textHash !== hash(event.text)
       || (previousSource.eventHash && previousSource.eventHash !== hash(event)))) {
       return deliverResult(event, { status: 'event_conflict', receipt: '同一消息 ID 的内容不一致，未新增操作。' });
     }
@@ -185,6 +193,20 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
           result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。${explanation}` };
         }
       }
+    } else if ((entry?.module === 'gtd' || !entry) && !taskQuery(command) && (selectionCandidate(command || event.text)
+      || (!entry && querySnapshot?.items))) {
+      const snapshot = querySnapshot;
+      const selection = taskSelection(command || event.text);
+      if (!parentReceipt || !snapshot?.scope || !Array.isArray(snapshot.items)) result = {
+        status:'task_selection_needs_query',receipt:'请回复机器人发出的任务查询回执，用编号选择事项；未执行或创建事项。',
+      };
+      else if (parentReceipt.senderId !== event.senderId || parentReceipt.conversationId !== event.conversationId) result = {
+        status:'task_selection_forbidden',receipt:'这条查询回执不属于当前用户或会话，请自行查询后回复对应回执；未执行或创建事项。',
+      };
+      else if (!selection) result = {status:'task_selection_invalid',receipt:'请用明确编号选择，例如“选择第1项”。本次仅支持定位，未执行或创建事项。'};
+      else result = await selectTasks({snapshot,selection,reminders,config,signal:options().signal});
+      store.set('routed-result:' + id, {event,result});
+      return deliverRouted(event,result);
     } else if (entry?.module === 'gtd' && taskQuery(command)) {
       result = await queryTasks({ reminders, config, ...taskQuery(command), now, signal: options().signal });
       store.set('routed-result:' + id, { event, result });

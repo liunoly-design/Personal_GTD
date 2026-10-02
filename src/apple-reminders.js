@@ -71,6 +71,12 @@ export function openAppleReminders({ statePath, sourceId, listId, helperPath, br
       if (!boundId) return { state: 'needs_list', candidates: (await bridge({ command: 'lists', sourceId }, options)).lists };
       return bridge({ command: 'queryTasks', sourceId, listId: boundId, limit, offset }, options);
     },
+    async readTasks({ items }, options) {
+      const safeId = value => typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\r\n\x00-\x1f]/u.test(value);
+      if (!Array.isArray(items) || items.length < 1 || items.length > 10
+        || items.some(item => !safeId(item?.id) || !safeId(item?.listId)) || new Set(items.map(item=>item.id)).size !== items.length) throw new Error('Invalid task references');
+      return bridge({ command:'readTasks', sourceId, items:items.map(({id,listId})=>({id,listId})) }, options);
+    },
     async listLists(options) {
       const binding = store.get('binding');
       if (binding.listId) {

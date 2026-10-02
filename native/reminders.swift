@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import CryptoKit
 
 struct BridgeError: Error { let code: String }
 let store = EKEventStore()
@@ -16,6 +17,20 @@ func itemValue(_ item: EKReminder) -> [String: Any] {
     return ["id": item.calendarItemIdentifier, "listId": item.calendar.calendarIdentifier,
             "title": item.title ?? "", "notes": item.notes ?? "", "remindAt": date.map { formatter.string(from: $0) } as Any? ?? NSNull(),
             "marker": item.url?.absoluteString ?? ""]
+}
+func taskValue(_ item: EKReminder) throws -> [String: Any] {
+    var baseline = itemValue(item)
+    baseline["completed"] = item.isCompleted
+    baseline["modifiedAt"] = item.lastModifiedDate?.timeIntervalSince1970 as Any? ?? NSNull()
+    baseline["due"] = item.dueDateComponents?.description ?? ""
+    baseline["priority"] = item.priority
+    baseline["alarms"] = item.alarms?.map { $0.absoluteDate?.timeIntervalSince1970.description ?? $0.relativeOffset.description } ?? []
+    let data = try JSONSerialization.data(withJSONObject: baseline, options: [.sortedKeys])
+    let revision = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    return ["id": item.calendarItemIdentifier, "listId": item.calendar.calendarIdentifier,
+            "sourceId": item.calendar.source.sourceIdentifier,
+            "title": String((item.title ?? "").prefix(200)) + ((item.title ?? "").count > 200 ? "…（标题省略）" : ""),
+            "completed": item.isCompleted, "revision": revision]
 }
 func calendar(_ input: [String: Any]) throws -> EKCalendar {
     let id = try string(input, "listId")
@@ -61,6 +76,23 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
         try store.saveCalendar(list, commit: true)
         return listValue(list)
     }
+    if command == "readTasks" {
+        guard let refs = input["items"] as? [[String: Any]], (1...10).contains(refs.count) else { throw BridgeError(code: "INVALID_INPUT") }
+        var seen = Set<String>()
+        let items = try refs.map { ref -> [String: Any] in
+            let id = try string(ref, "id"), listId = try string(ref, "listId")
+            guard id.count <= 1024, listId.count <= 1024,
+                  !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                  !listId.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                  seen.insert(id).inserted else { throw BridgeError(code: "INVALID_INPUT") }
+            guard let item = store.calendarItem(withIdentifier: id) as? EKReminder,
+                  item.calendar.source.sourceIdentifier == sourceId, item.calendar.calendarIdentifier == listId else {
+                return ["id": id, "state": "unavailable"]
+            }
+            return ["id": id, "state": "ok", "value": try taskValue(item)]
+        }
+        return ["items": items]
+    }
     if command == "queryTasks" {
         guard let limit = input["limit"] as? Int, (1...50).contains(limit),
               let offset = input["offset"] as? Int, (0...4950).contains(offset) else { throw BridgeError(code: "INVALID_INPUT") }
@@ -81,16 +113,11 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
                   bound.source.sourceIdentifier == sourceId else { throw BridgeError(code: "LIST_UNAVAILABLE") }
             list = bound
         }
-        let listId = list.calendarIdentifier
         // EventKit fetches a complete list; cap before returning a bounded page, never mutate objects.
         let all = try await reminders(list)
         guard all.count <= 10000 else { throw BridgeError(code: "QUERY_CAPACITY") }
         let unfinished = all.filter { !$0.isCompleted }.sorted { $0.calendarItemIdentifier < $1.calendarItemIdentifier }
-        let items = unfinished.dropFirst(offset).prefix(limit).map { item in
-            return ["id": item.calendarItemIdentifier, "listId": listId,
-                    "title": String((item.title ?? "").prefix(200)) + ((item.title ?? "").count > 200 ? "…（标题省略）" : ""),
-                    "completed": false] as [String: Any]
-        }
+        let items = try unfinished.dropFirst(offset).prefix(limit).map(taskValue)
         return ["state": "ok", "list": listValue(list), "items": items,
                 "total": unfinished.count, "hasMore": offset + limit < unfinished.count]
     }

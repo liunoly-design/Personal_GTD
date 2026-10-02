@@ -337,3 +337,12 @@ npm run verify:query -- --read-inbox --config /absolute/private/config.json
 
 
 F108 部署修复：OpenClaw 会复制插件到临时目录，私有运行配置现在必须设置 `remindersHelperPath` 为已编译 helper 的绝对路径（例如本机仓库下 `runtime/bin/pgtd-reminders` 的绝对路径）。缺少或使用相对路径时拒绝启动。已在真实网关中验证读取成功；此前失败消息仍复用旧结果，请发送一条新查询验证回执。详见 [helper 定位修复](.scratch/f108-task-query/issues/02-helper-path.md)。
+
+
+## F108/T05：回复查询回执选择任务
+
+回复机器人发出的新查询回执，发送 `选择第1项` 或 `选择第1,2项`，不用重复“小婕 gtd”前缀。系统按原回执编号定位真实任务，并只读核对当前状态；第2页使用回执实际显示的编号。事项已经编辑、完成、移动、删除或回执缺旧版核对信息时，请重新查询后选择。
+
+回复 `第1项完成` 或 `第5项移动到 Next 清单` 当前只会定位并准确提示维护尚未实现，不会执行修改，也不会让普通助手猜测权限。完成、移动及混合批量由F201/T01、F110/T01、F207/T01后续交付。最多选择10项，不能用任务标题代替真实对象；未经可信原消息核验、错误用户/会话或缺回执关联均不写入。
+
+`npm run test:query`、`npm run demo:query`覆盖可信编号定位、持久化与只读核对。详见[任务与验证](.scratch/f108-task-query/issues/05-reply-selection.md)和[部署证据](docs/deployment/f108-reply-selection-2026-10-03.md)。真实飞书新回复闭环待用户验收；旧回执可能需重新查询。

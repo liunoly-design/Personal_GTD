@@ -20,6 +20,7 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
     afterWrite(kind);
     return value;
   }
+  const revision = item => createHash('sha256').update(JSON.stringify(item)).digest('hex');
   const service = {
     async getOperation(id) {
       const record = store.get('operation:' + id);
@@ -39,7 +40,13 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       const items = all.filter(item => item.listId === list.id && !item.completed)
         .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
       return { state: 'ok', list: { ...list, sourceId: 'sim-source' }, total: items.length, hasMore: offset + limit < items.length,
-        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false })) };
+        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false, revision:revision(item) })) };
+    },
+    async readTasks({items}) {
+      return {items:items.map(({id,listId}) => {
+        const item=store.get('item:' + id);
+        return !item || item.listId !== listId ? {id,state:'unavailable'} : {id,state:'ok',value:{id,listId,sourceId:'sim-source',title:item.title,completed:Boolean(item.completed),revision:revision(item)}};
+      })};
     },
     async listLists() { return store.entries('list:').map(([, value]) => value); },
     async listItems() { return store.entries('item:').map(([, value]) => value); },

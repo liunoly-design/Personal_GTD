@@ -117,3 +117,18 @@ test('Apple显式列表查询不发送默认ID或改收集绑定，未绑定也�
   assert.equal((await unbound.queryTasks({ limit: 20, offset: 0, listName: '工作' })).list.id, 'work');
   assert.equal((await unbound.listLists())[0]?.id, undefined);
 });
+
+test('Apple按快照引用只读核对非默认人工事项，不开放原写入权限', async t => {
+  const dir=mkdtempSync(join(tmpdir(),'pgtd-read-selected-')); const requests=[];
+  const value={items:[{id:'manual',state:'ok',value:{id:'manual',listId:'work',sourceId:'S',revision:'a'.repeat(64),completed:false,title:'合成人工事项'}}]};
+  const bridge=async r=>{requests.push(r);return r.command==='boundList'?{id:'inbox',sourceId:'S',name:'Inbox'}:value;};
+  const apple=openAppleReminders({statePath:join(dir,'state.sqlite'),sourceId:'S',listId:'inbox',bridge});
+  t.after(()=>{apple.close();rmSync(dir,{recursive:true,force:true});});
+  assert.deepEqual(await apple.readTasks({items:[{id:'manual',listId:'work'}]}),value);
+  assert.deepEqual(requests[0],{command:'readTasks',sourceId:'S',items:[{id:'manual',listId:'work'}]});
+  assert.equal((await apple.listLists())[0].id,'inbox');
+  await assert.rejects(apple.setReminder('manual',{remindAt:'2026-10-04T01:00:00Z'},'a'.repeat(64)),/Unknown PGTD item/);
+  for (const items of [[],Array.from({length:11},(_,i)=>({id:'i'+i,listId:'work'})),[{id:'bad\n',listId:'work'}],[{id:'manual',listId:'work'},{id:'manual',listId:'work'}]]) {
+    await assert.rejects(apple.readTasks({items}),/Invalid task references/);
+  }
+});

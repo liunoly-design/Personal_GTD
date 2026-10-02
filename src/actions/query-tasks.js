@@ -75,7 +75,7 @@ export async function queryTasks({ reminders, config, page, listName, now, signa
       || typeof hasMore !== 'boolean') throw new Error('Invalid query result');
     const visible = items.map(item => {
       if (!safeId(item.id) || item.listId !== list.id || item.completed !== false) throw new Error('Invalid item');
-      return { id: item.id, listId: item.listId, sourceId: list.sourceId, title: title(item.title), completed: false };
+      return { id: item.id, listId: item.listId, sourceId: list.sourceId, title: title(item.title), completed: false, ...(typeof item.revision === 'string' && /^[a-f0-9]{64}$/u.test(item.revision) ? { revision: item.revision } : {}) };
     });
     const scope = { sourceId: list.sourceId, listId: list.id, listName: title(list.name), completed: false };
     const readAt = now?.() ?? new Date().toISOString();
