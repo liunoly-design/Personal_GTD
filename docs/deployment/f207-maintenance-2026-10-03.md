@@ -15,3 +15,6 @@
 独立快照 `/Users/mac/.openclaw/personal-gtd/releases/f207-maintenance-20261003`，最终快照217项及语法检查通过，PGTD source已确认指向该快照、origin=config、loaded。native helper沿用原签名标识编译并替换，旧helper、host/runtime配置保存在私有忽略目录runtime/feishu/batch-backup-20261003。未改变其他插件、默认绑定或预算配置。已准备需授权的合成验收脚本及专用fixture helper；本次尚未调用真实写入验收。任务状态in-progress保留真实验收缺口。
 
 最终网关running（PID41496）、RPC ok=true，PGTD loaded且source指向maintenance快照，飞书default running=true/probe.ok=true/lastError=null。连接健康不代表真实Apple业务验收。代码提交后用户仍未选择真实合成写入授权，本次未执行验收脚本。
+
+
+2026-10-03 继续验收：用户在已提供专用合成验收范围后授权“继续验收”。运行 node deploy/verify-task-maintenance.js --allow-synthetic-writes，真实Apple创建专用两清单及5项，完整查询→计划→确认→两项完成/一项移动→读回通过；原ID及受核验内容指纹、默认绑定保留，业务写入3、重复写入0。专用数据清理成功；查询/执行/清理2476ms（不含fixture准备），modelCalls=0、realFeishuSends=0，消息入口为合成桥接。用户已反馈真实飞书查询/批量完成成功；真实飞书混合移动及真实拒绝/外部并发/超时恢复尚未逐场景实测，合成套件覆盖相应保护。实现及本项适用验收完成，State=done，不将整个0.2版本或所有故障场景标为已验收。
