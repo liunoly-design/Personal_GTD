@@ -1,16 +1,29 @@
 // Complete numbered reply forms only. This module locates objects; it performs no writes.
 export function selectionCandidate(text) {
   return typeof text === 'string'
-    && /^(?:请)?(?:帮我)?(?:确认)?(?:选择|选中|选|查看|看看|完成|标记完成|移动|删除)?\s*第\s*[+-]?[0-9]/u.test(text.trim())
-    || (typeof text==='string' && /^(?:请)?(?:帮我)?(?:把|将|标记)/u.test(text.trim()) && /第\s*[0-9]+/u.test(text) && /完成|移动|删除|重开/u.test(text));
+    && /^(?:请)?(?:帮我)?(?:确认)?(?:选择|选中|选|查看|看看|完成|标记完成|移动|删除)?\s*第\s*[+-]?[0-9一二两三四五六七八九十百]/u.test(text.trim())
+    || (typeof text==='string' && /^(?:请)?(?:帮我)?(?:把|将|标记)/u.test(text.trim()) && /第\s*[0-9一二两三四五六七八九十百]+/u.test(text) && /完成|移动|删除|重开/u.test(text));
+}
+function ordinal(value) {
+  if (/^[0-9]+$/u.test(value)) return Number(value);
+  const digits = '零一二三四五六七八九';
+  if (value === '两') return 2;
+  if (value === '一百') return 100;
+  if (/^[一二三四五六七八九]$/u.test(value)) return digits.indexOf(value);
+  if (/^(?:[一二三四五六七八九])?十(?:[一二三四五六七八九])?$/u.test(value)) {
+    const [tens, ones] = value.split('十');
+    return (tens ? digits.indexOf(tens) : 1) * 10 + (ones ? digits.indexOf(ones) : 0);
+  }
+  return NaN;
 }
 export function taskSelection(text) {
-  let rest = text.trim().replace(/^(?:请)?(?:帮我)?(?:确认)?\s*/u, '').replace(/[。！!]$/u, '');
+  let rest = text.trim().replace(/^(?:请)?(?:帮我)?(?:确认)?(?:把|将)?\s*/u, '').replace(/[。！!]$/u, '');
   if (/[，,；;]\s*$/u.test(rest)) return null;
-  const number = '第\\s*(?<numbers>[0-9]+(?:\\s*[,，、和及]\\s*(?:第)?\\s*[0-9]+)*)\\s*(?:项|条|个)(?:任务|事项)?';
+  const numeral = '(?:[0-9]+|[一二两三四五六七八九十百]+)';
+  const number = '第\\s*(?<numbers>' + numeral + '(?:(?:\\s*[,，、和及]\\s*(?:第)?\\s*|\\s*第\\s*)' + numeral + ')*)\\s*(?:(?:项|条|个)(?:任务|事项)?|任务|事项)?';
   const end = '(?:[，,；;]\\s*|$)';
   const forms = [
-    ['complete', number + '\\s*(?:都|全部)?(?:标记为|标为|已)?完成' + end],
+    ['complete', number + '\\s*(?:都|全部)?(?:标记(?:为)?|标为|已)?完成' + end],
     ['complete', '(?:完成|标记完成)\\s*' + number + end],
     ['move', number + '\\s*(?:移动|移|挪)(?:到|至)\\s*(?<target>.+?)(?:清单|列表)' + end],
     ['select', '(?:选择|选中|选|查看|看看)?\\s*' + number + end],
@@ -26,8 +39,8 @@ export function taskSelection(text) {
       else if (/[「」“"]|[，,；;]/u.test(targetListName)) return null;
       if (!targetListName.trim() || [...targetListName].length > 200 || /[\x00-\x1f]/u.test(targetListName)) return null;
     }
-    for (const value of match.groups.numbers.split(/\s*[,，、和及]\s*(?:第)?\s*/u)) {
-      const n = Number(value);
+    for (const value of match.groups.numbers.split(/\s*[,，、和及]\s*(?:第)?\s*|\s*第\s*/u)) {
+      const n = ordinal(value);
       if (!Number.isSafeInteger(n) || n < 1 || selected.some(item => item.number === n) || selected.length >= 10) return null;
       selected.push({ number: n, action, ...(targetListName !== undefined ? { targetListName } : {}) });
     }

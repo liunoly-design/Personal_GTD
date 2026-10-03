@@ -72,7 +72,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
         const query = store.get('routed-result:' + input.replyTo)?.result;
         store.set('reply:' + value.message_id, { ...source, conversationId: input.conversationId,
           rootId: source?.rootId ?? input.replyTo,
-          ...(query?.scope && Array.isArray(query.items) ? {queryEventId:input.replyTo} : {}) });
+          ...(query?.scope && Array.isArray(query.items) ? {queryEventId:input.replyTo}
+            : source?.selectionQueryEventId ? {queryEventId:source.selectionQueryEventId} : {}) });
       });
       return value;
     },
@@ -204,9 +205,13 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       else if (parentReceipt.senderId !== event.senderId || parentReceipt.conversationId !== event.conversationId) result = {
         status:'task_selection_forbidden',receipt:'这条查询回执不属于当前用户或会话，请自行查询后回复对应回执；未执行或创建事项。',
       };
-      else if (!selection) result = {status:'task_selection_invalid',receipt:'请用明确编号，例如“选择第1项”或“第1项完成”。本次未执行或创建事项。'};
+      else if (!selection) result = {status:'task_selection_invalid',receipt:'没有看清要操作的编号和动作。可以直接回复这条提示，如“第一项标记完成”或“第一第二项完成”；单项完成已支持，批量完成尚未实现。本次未执行或创建事项。'};
       else if(selection.length===1&&selection[0].action==='complete') result=await completeTask({event,snapshot,selection,reminders,config,store,signal:options().signal});
       else result = await selectTasks({snapshot,selection,reminders,config,signal:options().signal});
+      if (['task_selection_invalid','task_selection_unavailable'].includes(result.status)
+        && parentReceipt?.senderId === event.senderId && parentReceipt.conversationId === event.conversationId) {
+        store.set('source:' + id, {...store.get('source:' + id), selectionQueryEventId:queryEventId});
+      }
       store.set('routed-result:' + id, {event,result});
       return deliverRouted(event,result);
     } else if (entry?.module === 'gtd' && taskQuery(command)) {

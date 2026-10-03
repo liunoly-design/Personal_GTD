@@ -503,8 +503,54 @@ test('同一事项有未知完成操作时，换新消息不能绕过核对重�
 test('带激活前缀但未支持的完成措辞不被默认收集',async t=>{
   const f=fixture(t);const list=await f.reminders.createList('Inbox','unsupported-complete-list');await f.reminders.createItem({listId:list.id,title:'合成措辞任务'},'unsupported-complete-item');
   await dispatch(f,'om_unsupported_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
-  for(const [i,text]of['小婕 gtd 把第1项标记完成','小婕 gtd 将第1项移动到Next清单'].entries()){
+  for(const [i,text]of['小婕 gtd 把第1项完成后删除','小婕 gtd 将第1项移动到Next清单并删除'].entries()){
     const result=await replySelection(f,'om_unsupported_text'+i,text,receipt);assert.equal(result.status,'task_selection_invalid');
   }
   assert.equal((await f.reminders.listItems()).length,1);assert.equal(f.calls,0);
+});
+
+test('自然中文和连续编号识别批量意图，不误写入',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','natural-list');
+  for(let i=1;i<=2;i++)await f.reminders.createItem({listId:list.id,title:'合成编号任务'+i},'natural-item'+i);
+  await dispatch(f,'om_natural_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  let writes=0;f.reminders.completeTask=async()=>{writes++;throw new Error('unexpected write');};
+  for(const [i,text]of ['第一第二任务标记完成','第1第2项任务标记完成','第一、第二项都完成','第 1 第 2 项标记完成'].entries()){
+    const result=await replySelection(f,'om_natural'+i,text,receipt);
+    assert.equal(result.status,'task_selection_unavailable',text);assert.deepEqual(result.selected.map(x=>x.number),[1,2]);
+  }
+  assert.equal((await replySelection(f,'om_natural_bare','第1第2',receipt)).status,'tasks_selected');
+  assert.equal((await dispatch(f,'om_natural_unlinked','第1第2')).status,'task_selection_needs_query');
+  assert.equal(writes,0);assert.equal(f.calls,0);
+});
+
+test('回复编号澄清提示可纠正原查询，重启保留关联且不继承定位结果',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','clarify-list');
+  for(let i=1;i<=2;i++)await f.reminders.createItem({listId:list.id,title:'合成澄清任务'+i},'clarify-item'+i);
+  await dispatch(f,'om_clarify_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  assert.equal((await replySelection(f,'om_clarify_invalid','第一第二任务标记完成啊',receipt)).status,'task_selection_invalid');
+  const prompt=f.sent.at(-1).message_id;await f.restart();
+  const batch=await replySelection(f,'om_clarify_fixed','第1第2项任务标记完成',prompt);
+  assert.equal(batch.status,'task_selection_unavailable');assert.deepEqual(batch.selected.map(x=>x.number),[1,2]);
+  const unavailable=f.sent.at(-1).message_id;
+  assert.equal((await replySelection(f,'om_clarify_single','第一项标记完成',unavailable)).status,'task_completed');
+  const completed=f.sent.at(-1).message_id;
+  assert.equal((await replySelection(f,'om_clarify_noinherit','第二项完成',completed)).status,'task_selection_needs_query');
+  assert.equal(f.calls,0);
+});
+
+test('自然编号澄清关联不越权、不改跟新查询，含否定或重复动作不执行',async t=>{
+  const f=fixture(t,{config:{allowedSenderIds:['ou_test','ou_other'],allowedConversationIds:['oc_test','oc_other']}});
+  const list=await f.reminders.createList('Inbox','natural-safe-list');
+  await f.reminders.createItem({listId:list.id,title:'合成旧页任务'},'natural-safe-one');
+  await dispatch(f,'om_natural_safe_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  for(const [i,text]of ['第一第一项完成','第十二项完成后删除','不要把第一项完成','第一二项完成','第一项完成，'].entries()){
+    assert.equal((await replySelection(f,'om_natural_safe_bad'+i,text,receipt)).status,'task_selection_invalid');
+  }
+  const prompt=f.sent.at(-1).message_id;
+  const other=await replySelection(f,'om_natural_safe_foreign','第一项标记完成',prompt,{sender:{id:'ou_other',id_type:'open_id',sender_type:'user'}},{SenderId:'ou_other'});
+  assert.equal(other.status,'task_selection_forbidden');assert.doesNotMatch(other.receipt,/合成旧页任务/);
+  await f.reminders.createItem({listId:list.id,title:'合成新页任务'},'natural-safe-two');
+  await dispatch(f,'om_natural_safe_new','小婕 gtd 查询任务');
+  assert.equal((await replySelection(f,'om_natural_safe_oldpage','第二项完成',prompt)).status,'task_selection_needs_query');
+  assert.equal((await f.reminders.listItems()).filter(x=>x.completed).length,0);assert.equal(f.calls,0);
 });
