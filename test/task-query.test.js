@@ -625,3 +625,10 @@ test('计划中的未识别确认不默认收集，原地目标无写入，移�
   const read=f.reminders.readTasks.bind(f.reminders);f.reminders.readTasks=async(...args)=>{const r=await read(...args);if(moves&&r.items[0]?.value)r.items[0].value.contentRevision='f'.repeat(64);return r;};
   assert.equal((await replySelection(f,'om_fields_confirm','确认执行',parent)).status,'task_plan_unknown');await f.restart();await f.capture.recover();assert.equal(moves,1);
 });
+
+test('截图中的查询 inbox 任务简写按完整清单名读取，帮助提示反映批量已上线',async t=>{
+  const f=fixture(t);const inbox=await f.reminders.createList('Inbox','short-inbox');await f.reminders.createItem({listId:inbox.id,title:'合成简写任务'},'short-item');
+  const query=await dispatch(f,'om_short_query','小婕 gtd 查询 inbox 任务');assert.equal(query.status,'tasks_found');assert.equal(query.scope.listId,inbox.id);assert.equal(f.calls,0);
+  const unsupported=await dispatch(f,'om_short_filter','小婕 gtd 查询任务 今天');assert.equal(unsupported.status,'gtd_unsupported');
+  assert.match(unsupported.receipt,/确认执行/);assert.doesNotMatch(unsupported.receipt,/移动\/批量维护.*尚未实现/);
+});

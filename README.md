@@ -373,3 +373,6 @@ F201/T01已支持回复 `第1项完成` 直接完成唯一事项并读回。`第
 重复确认和重启不重放已开始操作，结果未知先核对；独立项失败可继续，逐项显示成功、明确失败或未知。修改范围请回复原查询生成新计划，旧未执行计划失效。不支持删除、重开或跨账户。带复发规则或位置提醒的移动暂时阻塞，ID或内容未能读回核实不声称成功；原任务不复制替代，默认收集位置不变。Apple不提供本流程的跨任务事务或跨设备锁。
 
 演示与检查：`npm run demo:maintenance`、`npm run test:query`、`npm test`。真实验收接口：单独授权后编译 deploy/maintenance-fixture.swift（使用 native/Info.plist、与提醒helper相同签名标识），运行 `node deploy/verify-task-maintenance.js --allow-synthetic-writes`，仅创建专用合成源/目标清单与5项，完成2项移动1项并清理；失败保留私有验收记录，不盲重试。真实验收状态见[部署记录](docs/deployment/f207-maintenance-2026-10-03.md)。
+
+
+F108/T09：指定清单可简写 `小婕 gtd 查询 inbox 任务` 或 `小婕 gtd 查询 waiting 任务`，按完整名称匹配清单；含空格的名称使用“查询 <名称> 列表的任务”。不支持表达的帮助已反映多项完成/移动的计划确认能力。旧回执仍代表当时结果，请用新消息重新查询。
