@@ -1,5 +1,18 @@
 // Complete, bounded command forms only; extra filters/compound instructions stay guarded.
 export function taskQuery(instruction) {
+  const filtered = instruction.trim().match(/^(?<prefix>(?:请)?(?:帮我)?(?:查询|查看|查一下|看看|看一下|列出(?:来)?|找一下)\s*)(?<scope>.*?)关于(?<keyword>.+?)的(?:未完成)?(?:任务|事项|待办)(?:\s*第\s*(?<page>[0-9]+)\s*页)?[？?。]?$/u);
+  if (filtered) {
+    let keyword = filtered.groups.keyword.trim();
+    const quoted = /^(?:「[^」]+」|“[^”]+”|"[^"]+")$/u.test(keyword);
+    if (quoted) keyword = keyword.slice(1, -1);
+    else if (/[「」“”"，,；;]|关于|(?:今天|明天|后天|到期|提醒|创建|完成时间)|(?:然后|并|同时|再).*(?:收集|完成|移动|删除|查询)/u.test(keyword)) return null;
+    if (!keyword.trim() || [...keyword].length > 200 || /[\x00-\x1f\x7f-\x9f]/u.test(keyword)) return null;
+    const scope = filtered.groups.scope.trim().replace(/的$/u, '');
+    if (scope.includes('关于') || /^(?:所有|全部)(?:列表|清单)?$/u.test(scope) || /[\r\n]/u.test(scope)) return null;
+    const base = taskQuery(filtered.groups.prefix + (scope ? scope + '的任务' : '任务'))
+      ?? (scope ? taskQuery(filtered.groups.prefix + scope + ' 任务') : null);
+    return base ? { ...base, page: Number(filtered.groups.page ?? 1), keyword } : null;
+  }
   const match = instruction.trim().match(/^(?:请)?(?:帮我)?(?:(?:查询|查看|查一下|看看|看一下|列出(?:来)?|找一下)\s*(?:未完成任务|未完成事项|任务|事项|待办|Inbox)|有哪些(?:任务|待办)|任务有哪些)(?:\s*第\s*([0-9]+)\s*页)?[？?。]?$/iu);
   if (match) return { page: Number(match[1] ?? 1) };
   const prefix = '^(?:请)?(?:帮我)?(?:查询|查看|查一下|看看|看一下|列出(?:来)?|找一下)\\s*';
@@ -38,7 +51,7 @@ function queryTime(readAt, timeZone = 'Asia/Shanghai') {
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}（${timeZone === 'Asia/Shanghai' ? '北京时间' : values.timeZoneName}）`;
 }
-export async function queryTasks({ reminders, config, page, listName, now, signal }) {
+export async function queryTasks({ reminders, config, page, listName, keyword, now, signal }) {
   if (!Number.isSafeInteger(page) || page < 1 || page > 100) return {
     status: 'query_failed', code: 'INVALID_PAGE', receipt: '任务查询页码须为 1–100；未读取或创建事项。',
   };
@@ -49,7 +62,7 @@ export async function queryTasks({ reminders, config, page, listName, now, signa
   let timer, onAbort;
   try {
     const response = await Promise.race([
-      Promise.resolve().then(() => { querySignal.throwIfAborted(); return reminders.queryTasks({ limit: pageSize, offset: (page - 1) * pageSize, ...(listName !== undefined ? { listName } : {}) }, { signal: querySignal, timeoutMs }); }),
+      Promise.resolve().then(() => { querySignal.throwIfAborted(); return reminders.queryTasks({ limit: pageSize, offset: (page - 1) * pageSize, ...(listName !== undefined ? { listName } : {}), ...(keyword !== undefined ? { keyword } : {}) }, { signal: querySignal, timeoutMs }); }),
       new Promise((_, reject) => {
         onAbort = () => reject(querySignal.reason);
         querySignal.addEventListener('abort', onAbort, { once: true });
@@ -77,16 +90,17 @@ export async function queryTasks({ reminders, config, page, listName, now, signa
       if (!safeId(item.id) || item.listId !== list.id || item.completed !== false) throw new Error('Invalid item');
       return { id: item.id, listId: item.listId, sourceId: list.sourceId, title: title(item.title), completed: false, ...(typeof item.contentRevision==='string'&&/^[a-f0-9]{64}$/u.test(item.contentRevision)?{contentRevision:item.contentRevision}:{}), ...(typeof item.revision === 'string' && /^[a-f0-9]{64}$/u.test(item.revision) ? { revision: item.revision, ...(typeof item.fieldsRevision==='string'&&/^[a-f0-9]{64}$/u.test(item.fieldsRevision)?{fieldsRevision:item.fieldsRevision}:{}) } : {}) };
     });
-    const scope = { sourceId: list.sourceId, listId: list.id, listName: title(list.name), completed: false };
+    const scope = { sourceId: list.sourceId, listId: list.id, listName: title(list.name), completed: false, ...(keyword !== undefined ? { keyword } : {}) };
     const readAt = now?.() ?? new Date().toISOString();
     const status = total === 0 ? 'tasks_empty' : visible.length === 0 ? 'tasks_page_empty' : 'tasks_found';
     return { status, scope, readAt, page, pageSize, total, hasMore, items: visible,
       receipt: `${scope.listName} · 未完成 ${total} 项`
+        + (keyword !== undefined ? `\n标题包含${quotedList(keyword)}` : '')
         + (hasMore || page > 1 ? `\n第 ${page} 页` : '')
-        + (status === 'tasks_empty' ? '\n\n没有未完成事项。' : status === 'tasks_page_empty' ? '\n\n本页没有事项，请查看前面的页码。'
+        + (status === 'tasks_empty' ? (keyword !== undefined ? '\n\n没有标题匹配该关键词的未完成事项。' : '\n\n没有未完成事项。') : status === 'tasks_page_empty' ? '\n\n本页没有事项，请查看前面的页码。'
           : '\n\n' + visible.map((item, index) => `${(page - 1) * pageSize + index + 1}. ${item.title}`).join('\n'))
         + `\n\n查询时间：${queryTime(readAt, config.timeZone)}`
-        + (hasMore ? page < 100 ? `\n还有更多，发送：小婕 gtd ${listName !== undefined ? `查询${quotedList(listName)}列表的任务` : '查询任务'} 第 ${page + 1} 页` : '\n还有更多事项，已达到查询页数上限。' : '') };
+        + (hasMore ? page < 100 ? `\n还有更多，发送：小婕 gtd ${keyword !== undefined ? `查询${listName !== undefined ? quotedList(listName) + '列表的' : ''}关于${quotedList(keyword)}的任务` : listName !== undefined ? `查询${quotedList(listName)}列表的任务` : '查询任务'} 第 ${page + 1} 页` : '\n还有更多事项，已达到查询页数上限。' : '') };
   } catch (error) {
     const denied = error?.reason === 'PERMISSION_DENIED' || error?.code === 'PERMISSION_DENIED';
     const timeout = error?.code === 'QUERY_TIMEOUT';

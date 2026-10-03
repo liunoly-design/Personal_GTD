@@ -162,6 +162,13 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
     if command == "queryTasks" {
         guard let limit = input["limit"] as? Int, (1...50).contains(limit),
               let offset = input["offset"] as? Int, (0...4950).contains(offset) else { throw BridgeError(code: "INVALID_INPUT") }
+        var keyword: String? = nil
+        if input["keyword"] != nil {
+            let value = try string(input, "keyword")
+            guard value.unicodeScalars.count <= 200, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw BridgeError(code: "INVALID_INPUT") }
+            keyword = value.precomposedStringWithCanonicalMapping.lowercased()
+        }
         let list: EKCalendar
         if input["listName"] != nil {
             let name = try string(input, "listName")
@@ -182,7 +189,15 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
         // EventKit fetches a complete list; cap before returning a bounded page, never mutate objects.
         let all = try await reminders(list)
         guard all.count <= 10000 else { throw BridgeError(code: "QUERY_CAPACITY") }
-        let unfinished = all.filter { !$0.isCompleted }.sorted { $0.calendarItemIdentifier < $1.calendarItemIdentifier }
+        let unfinished = all.filter {
+            item in
+            guard !item.isCompleted else { return false }
+            guard let keyword else { return true }
+            // NSString literal search matches code-unit substrings, including inside a grapheme,
+            // like JavaScript includes after the same NFC/default-lowercase transformation.
+            let title = (item.title ?? "").precomposedStringWithCanonicalMapping.lowercased() as NSString
+            return title.range(of: keyword, options: .literal).location != NSNotFound
+        }.sorted { $0.calendarItemIdentifier < $1.calendarItemIdentifier }
         let items = try unfinished.dropFirst(offset).prefix(limit).map(taskValue)
         return ["state": "ok", "list": listValue(list), "items": items,
                 "total": unfinished.count, "hasMore": offset + limit < unfinished.count]

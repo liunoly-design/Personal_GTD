@@ -28,7 +28,7 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       const record = store.get('operation:' + id);
       return record ? { state: 'applied', value: record.value } : { state: 'absent' };
     },
-    async queryTasks({ limit, offset, listName }) {
+    async queryTasks({ limit, offset, listName, keyword }) {
       const binding = store.get('query-binding');
       const lists = store.entries('list:').map(([, value]) => value);
       const matches = listName === undefined ? null : lists.filter(list => list.name.toLowerCase() === listName.toLowerCase());
@@ -39,7 +39,8 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       if (!list) throw new Error('List unavailable');
       const all = store.entries('item:').map(([, value]) => value).filter(item => item.listId === list.id);
       if (all.length > 10000) throw new Error('Query capacity');
-      const items = all.filter(item => item.listId === list.id && !item.completed)
+      const normalizedKeyword = keyword?.normalize('NFC').toLowerCase();
+      const items = all.filter(item => item.listId === list.id && !item.completed && (normalizedKeyword === undefined || item.title.normalize('NFC').toLowerCase().includes(normalizedKeyword)))
         .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
       return { state: 'ok', list: { ...list, sourceId: 'sim-source' }, total: items.length, hasMore: offset + limit < items.length,
         items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false, revision:revision(item), fieldsRevision:fieldsRevision(item),contentRevision:contentRevision(item) })) };

@@ -160,3 +160,14 @@ test('Apple移动解析源目标且持久化原ID移动意图，核对目标不�
   await assert.rejects(apple.resolveTaskTarget({name:'',sourceListId:'Waiting'}));
   await assert.rejects(apple.setReminder('manual',{},'d'.repeat(64)),/Unknown PGTD item/);
 });
+
+test('Apple关键词查询透传完整关键词且保留绑定，非法关键词桥接前拒绝',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'pgtd-kw-apple-')),requests=[];
+  const apple=openAppleReminders({statePath:join(dir,'apple.sqlite'),sourceId:'S',listId:'L',bridge:async input=>{requests.push(input);return {state:'ok'};}});
+  t.after(()=>{apple.close();rmSync(dir,{recursive:true,force:true});});
+  await apple.queryTasks({limit:1,offset:1,listName:'Waiting',keyword:'金山'});
+  assert.deepEqual(requests[0],{command:'queryTasks',sourceId:'S',listName:'Waiting',keyword:'金山',limit:1,offset:1});
+  await apple.queryTasks({limit:20,offset:0,keyword:'CAFÉ'});assert.equal(requests[1].listId,'L');assert.equal(requests[1].keyword,'CAFÉ');
+  for(const keyword of ['', ' '.repeat(2), '字'.repeat(201), 'a\nb',7])await assert.rejects(apple.queryTasks({limit:20,offset:0,keyword}),/Invalid query keyword/);
+  assert.equal(requests.length,2);
+});

@@ -61,6 +61,9 @@ try {
   assert.equal(selected.scope.listId, work.id);
   assert.equal(selected.total, 1);
   assert.equal((await dispatch(f, 'om_demo_missing', '小婕 gtd 查询不存在列表的任务')).status, 'query_list_not_found');
+  const keyword = await dispatch(f, 'om_demo_keyword', '小婕 gtd 查询 工作 里面关于工作任务的任务');
+  assert.equal(keyword.total, 1);assert.equal(keyword.items[0].id, selected.items[0].id);
+  assert.equal((await dispatch(f, 'om_demo_keyword_empty', '小婕 gtd 查询关于不存在的任务')).status, 'tasks_empty');
   const queryReceipt = f.sent.find(v => v.replyTo === 'om_demo_work').message_id;
   const selectText = '选择第1项';
   f.messages.set('om_demo_select', message('om_demo_select', selectText, { parent_id: queryReceipt }));
@@ -70,6 +73,6 @@ try {
   await f.restart();
   assert.deepEqual(await f.capture.handle({ ...context('om_demo_select',selectText), ReplyToId:queryReceipt }),selection);
   assert.equal((await f.reminders.listItems()).length,6);
-  console.log(JSON.stringify({ mode: 'simulation', seeded: 6, unfinished: 5, pages: 2, selectedListItems: selected.total, selectedReferences:selection.selected.length, maintenanceExecuted:false, receipts: f.sent.length,
+  console.log(JSON.stringify({ mode: 'simulation', seeded: 6, unfinished: 5, pages: 2, keywordMatches: keyword.total, selectedListItems: selected.total, selectedReferences:selection.selected.length, maintenanceExecuted:false, receipts: f.sent.length,
     modelCalls: f.calls, queryWrites: 0, realAppleReads: 0, realFeishuSends: 0, durationMs: Math.round(performance.now() - started) }));
 } finally { for (const cleanup of cleanups) await cleanup(); }

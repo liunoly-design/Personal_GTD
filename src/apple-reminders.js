@@ -58,18 +58,20 @@ export function openAppleReminders({ statePath, sourceId, listId, helperPath, br
     return remember(await bridge(request, options));
   }
   return {
-    async queryTasks({ limit, offset, listName }, options) {
+    async queryTasks({ limit, offset, listName, keyword }, options) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50 || !Number.isSafeInteger(offset) || offset < 0 || offset > 4950) {
         throw new Error('Invalid query pagination');
       }
+      if (keyword !== undefined && (typeof keyword !== 'string' || !keyword.trim() || [...keyword].length > 200 || /[\x00-\x1f\x7f-\x9f]/u.test(keyword))) throw new Error('Invalid query keyword');
+      const filter = keyword !== undefined ? { keyword } : {};
       if (listName !== undefined) {
         if (typeof listName !== 'string' || !listName.trim() || [...listName].length > 200 || /[\r\n\x00-\x1f]/u.test(listName)) throw new Error('Invalid query list name');
-        return bridge({ command: 'queryTasks', sourceId, listName, limit, offset }, options);
+        return bridge({ command: 'queryTasks', sourceId, listName, limit, offset, ...filter }, options);
       }
       const binding = store.get('binding');
       const boundId = binding.listId ?? listId;
       if (!boundId) return { state: 'needs_list', candidates: (await bridge({ command: 'lists', sourceId }, options)).lists };
-      return bridge({ command: 'queryTasks', sourceId, listId: boundId, limit, offset }, options);
+      return bridge({ command: 'queryTasks', sourceId, listId: boundId, limit, offset, ...filter }, options);
     },
     async completeTask({id,listId,expectedRevision,fieldsRevision},operationId,options) {
       const validId=v=>typeof v==='string'&&v.length>0&&v.length<=1024&&!/[\r\n\x00-\x1f]/u.test(v);

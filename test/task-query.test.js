@@ -214,7 +214,7 @@ test('指定列表同义、引号与大小写可用，全部列表和附加筛�
   }
   assert.equal((await dispatch(f, 'om_special_name', '小婕 gtd 查询「研发，A 列表」列表的任务')).scope.listId, special.id);
   for (const [i, text] of ['查询所有列表的任务', '查询全部列表的任务', '不要查询Work列表的任务', '“查询Work列表的任务”',
-    '查询Work列表的任务并收集牛奶', '查询Work列表今天到期的任务', '查询关于金山的任务', '查询「Work」列表的任务 第0页'].entries()) {
+    '查询Work列表的任务并收集牛奶', '查询Work列表今天到期的任务', '查询「Work」列表的任务 第0页'].entries()) {
     const r = await dispatch(f, 'om_name_guard' + i, '小婕 gtd ' + text);
     assert.ok(['gtd_unsupported', 'needs_instruction', 'query_failed'].includes(r.status), text);
   }
@@ -631,4 +631,92 @@ test('截图中的查询 inbox 任务简写按完整清单名读取，帮助提�
   const query=await dispatch(f,'om_short_query','小婕 gtd 查询 inbox 任务');assert.equal(query.status,'tasks_found');assert.equal(query.scope.listId,inbox.id);assert.equal(f.calls,0);
   const unsupported=await dispatch(f,'om_short_filter','小婕 gtd 查询任务 今天');assert.equal(unsupported.status,'gtd_unsupported');
   assert.match(unsupported.receipt,/确认执行/);assert.doesNotMatch(unsupported.receipt,/移动\/批量维护.*尚未实现/);
+});
+
+test('标题关键词默认查询只匹配完整标题、不匹配备注或已完成项，零写入零模型', async t => {
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','keyword-default');
+  const match=await f.reminders.createItem({listId:list.id,title:'联系金山公司',notes:'保留备注'},'keyword-match');
+  await f.reminders.createItem({listId:list.id,title:'其他公司',notes:'金山'},'keyword-notes');
+  await f.reminders.createItem({listId:list.id,title:'金与山之间'},'keyword-split');
+  await f.reminders.createItem({listId:list.id,title:'金山已处理',completed:true},'keyword-done');
+  const before=await f.reminders.listItems();
+  const r=await dispatch(f,'om_keyword_default','小婕 gtd 查询关于金山的任务');
+  assert.equal(r.status,'tasks_found');assert.equal(r.total,1);assert.equal(r.items[0].id,match.id);
+  assert.equal(r.scope.keyword,'金山');assert.match(r.receipt,/标题包含「金山」/);
+  assert.deepEqual(await f.reminders.listItems(),before);assert.equal(f.calls,0);
+});
+
+test('指定清单关键词过滤后计数分页，下一页保持关键词，重启恢复与默认绑定不变',async t=>{
+  const f=fixture(t,{config:{queryPageSize:1}});const inbox=await f.reminders.createList('Inbox','kw-inbox'),waiting=await f.reminders.createList('Waiting','kw-waiting');
+  await f.reminders.createItem({listId:inbox.id,title:'金山默认任务'},'kw-default');
+  for(const [i,title]of ['普通任务','金山第一项','金山第二项','金山已完'].entries())await f.reminders.createItem({listId:waiting.id,title,completed:i===3},'kw-page'+i);
+  await f.reminders.createItem({listId:inbox.id,title:'默认绑定基线'},'kw-bind');
+  const r=await dispatch(f,'om_kw_page','小婕 gtd 查询 waiting 里面关于金山的任务');
+  assert.equal(r.status,'tasks_found');assert.equal(r.scope.listId,waiting.id);assert.equal(r.total,2);assert.equal(r.items.length,1);assert.equal(r.hasMore,true);
+  const next=r.receipt.match(/发送：(.*)$/u)[1];const second=await dispatch(f,'om_kw_next',next);
+  assert.equal(second.total,2);assert.equal(second.hasMore,false);assert.notEqual(second.items[0].id,r.items[0].id);assert.match(second.receipt,/2\. /);
+  assert.equal((await dispatch(f,'om_kw_empty','小婕 gtd 查询 waiting 里面关于不存在的任务')).status,'tasks_empty');
+  assert.equal((await dispatch(f,'om_kw_empty_page','小婕 gtd 查询 waiting 里面关于金山的任务 第3页')).status,'tasks_page_empty');
+  await f.restart();await f.capture.recover();assert.deepEqual(await dispatch(f,'om_kw_page','小婕 gtd 查询 waiting 里面关于金山的任务'),r);
+  const normal=await dispatch(f,'om_kw_normal','小婕 gtd 查询任务');assert.equal(normal.scope.listId,inbox.id);assert.equal(normal.total,2);assert.equal(f.calls,0);
+});
+
+test('关键词大小写与NFC匹配但不折叠音调或全角，歧义及复合指令不读不写',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','kw-unicode');
+  await f.reminders.createItem({listId:list.id,title:'讨论 CAFÉ 方案'},'kw-cafe');
+  await f.reminders.createItem({listId:list.id,title:'讨论 CAFE 方案'},'kw-plain');
+  await f.reminders.createItem({listId:list.id,title:'讨论 ＣＡＦÉ 方案'},'kw-wide');
+  assert.equal((await dispatch(f,'om_kw_unicode','小婕 gtd 查看关于cafe\u0301的任务')).total,1);
+  let reads=0;f.reminders.queryTasks=async()=>{reads++;throw new Error('Must not read');};
+  for(const [i,text]of ['查询关于的任务','查询关于金山关于公司的任务','查询关于今天到期的任务','查询关于金山然后完成任务的任务','查询关于'+ '字'.repeat(201)+'的任务','查询关于金\n山的任务','查询所有列表关于金山的任务','查询关于金山的任务并收集牛奶'].entries()){
+    const r=await dispatch(f,'om_kw_guard'+i,'小婕 gtd '+text);assert.ok(['gtd_unsupported','needs_instruction'].includes(r.status),text);
+  }
+  assert.equal(reads,0);assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,3);
+});
+
+test('关键词查询失败不伪装空匹配，账户权限容量失败与身份保护沿用只读守卫',async t=>{
+  const f=fixture(t,{config:{sourceId:'sim-source'}});
+  const missing=await dispatch(f,'om_kw_missing','小婕 gtd 查询不存在里面关于金山的任务');assert.equal(missing.status,'query_list_not_found');
+  await f.reminders.createList('Waiting','kw-dup1');await f.reminders.createList('Waiting','kw-dup2');
+  assert.equal((await dispatch(f,'om_kw_dup','小婕 gtd 查询 waiting 里面关于金山的任务')).status,'query_needs_list');
+  for(const [i,error]of [Object.assign(new Error('Denied'),{code:'PERMISSION_DENIED'}),Object.assign(new Error('Capacity'),{code:'QUERY_CAPACITY'}),new Error('Account unavailable')].entries()){
+    f.reminders.queryTasks=async()=>{throw error;};const r=await dispatch(f,'om_kw_fail'+i,'小婕 gtd 查询关于金山的任务');
+    assert.equal(r.status,i===0?'query_forbidden':'query_failed');assert.doesNotMatch(r.receipt,/没有标题匹配/);
+  }
+  f.reminders.queryTasks=async()=>({state:'ok',list:{id:'L',sourceId:'wrong-source',name:'Waiting'},items:[],total:0,hasMore:false});
+  assert.equal((await dispatch(f,'om_kw_foreign','小婕 gtd 查询关于金山的任务')).status,'query_failed');
+  let reads=0;f.reminders.queryTasks=async()=>{reads++;throw new Error('unexpected');};
+  const text='小婕 gtd 查询关于金山的任务';f.messages.set('om_kw_identity',message('om_kw_identity',text,{sender:{id:'ou_wrong',id_type:'open_id',sender_type:'user'}}));
+  assert.equal((await f.capture.handle(context('om_kw_identity',text))).status,'invalid_source');assert.equal(reads,0);assert.equal(f.calls,0);
+});
+
+test('关键词回执编号维护原ID与字段，批量完成移动先确认，回执恢复不重读',async t=>{
+  const options={failReplyFor:'om_kw_maintenance'};const f=fixture(t,options);const list=await f.reminders.createList('Waiting','kw-maintain');const target=await f.reminders.createList('Next','kw-next');
+  for(const [i,title]of ['无关任务','金山同名任务','金山同名任务','金山第三项'].entries())await f.reminders.createItem({listId:list.id,title,notes:'合成保留字段'},'kw-maintain'+i);
+  const result=await dispatch(f,'om_kw_maintenance','小婕 gtd 查询 waiting 里面关于金山的任务');assert.equal(result.delivery,'pending');assert.equal(result.total,3);
+  let reads=0;const query=f.reminders.queryTasks;f.reminders.queryTasks=async(...a)=>{reads++;return query(...a);};
+  options.failReplyFor=undefined;await f.restart();await f.capture.recover();assert.equal(reads,0);
+  const fresh=await dispatch(f,'om_kw_maintenance_fresh','小婕 gtd 查询 waiting 里面关于金山的任务');assert.equal(fresh.delivery,'sent');const receipt=f.sent.at(-1).message_id;
+  const selected=await replySelection(f,'om_kw_select','选择第1项',receipt);assert.equal(selected.selected[0].id,result.items[0].id);assert.equal(selected.selected[0].revision,result.items[0].revision);
+  const plan=await replySelection(f,'om_kw_plan','第一第二项完成，第三项移动到Next清单',receipt);assert.equal(plan.status,'task_plan_ready');
+  assert.equal((await f.reminders.listItems()).filter(x=>x.completed||x.listId===target.id).length,0);
+  const confirmed=await replySelection(f,'om_kw_confirm','确认执行',f.sent.at(-1).message_id);assert.equal(confirmed.status,'task_plan_completed');
+  const items=await f.reminders.listItems();assert.equal(items.filter(x=>x.completed).length,2);assert.equal(items.find(x=>x.id===result.items[2].id).listId,target.id);assert.ok(items.every(x=>x.notes==='合成保留字段'));assert.equal(f.calls,0);
+});
+
+test('空关键词指定清单不当成另一个清单名，保留引号中的字面关键词及标题全长匹配',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Waiting','kw-literal');
+  await f.reminders.createItem({listId:list.id,title:'关于今天到期的安排'},'kw-literal1');
+  await f.reminders.createItem({listId:list.id,title:'字'.repeat(205)+'金山'},'kw-long-title');
+  const literal=await dispatch(f,'om_kw_literal','小婕 gtd 查询 waiting 里面关于「关于今天到期」的任务');assert.equal(literal.total,1);
+  const long=await dispatch(f,'om_kw_longtitle','小婕 gtd 查询 waiting 里面关于金山的任务');assert.equal(long.total,1);assert.match(long.items[0].title,/标题省略/);
+  let reads=0;f.reminders.queryTasks=async()=>{reads++;throw new Error('unexpected');};
+  assert.equal((await dispatch(f,'om_kw_blank','小婕 gtd 查询 waiting 里面关于的任务')).status,'gtd_unsupported');assert.equal(reads,0);
+});
+
+test('关键词按归一化小写后的字面子串匹配组合emoji及小写扩展字符',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','kw-scalars');
+  await f.reminders.createItem({listId:list.id,title:'👩‍💻 编程'},'kw-emoji');await f.reminders.createItem({listId:list.id,title:'İ 团队'},'kw-dotted');
+  assert.equal((await dispatch(f,'om_kw_emoji','小婕 gtd 查询关于👩的任务')).total,1);
+  assert.equal((await dispatch(f,'om_kw_dotted','小婕 gtd 查询关于i的任务')).total,1);
 });
