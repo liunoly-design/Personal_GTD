@@ -23,8 +23,17 @@ func taskValue(_ item: EKReminder) throws -> [String: Any] {
     baseline["due"] = item.dueDateComponents?.description ?? ""
     baseline["priority"] = item.priority
     baseline["alarms"] = item.alarms?.map { $0.absoluteDate?.timeIntervalSince1970.description ?? $0.relativeOffset.description } ?? []
+    baseline["start"] = item.startDateComponents?.description ?? ""
+    baseline["location"] = item.location ?? ""
+    baseline["timeZone"] = item.timeZone?.identifier ?? ""
     let fieldsData = try JSONSerialization.data(withJSONObject: baseline, options: [.sortedKeys])
     let fieldsRevision = SHA256.hash(data: fieldsData).map { String(format: "%02x", $0) }.joined()
+    var content = baseline
+    content.removeValue(forKey: "id"); content.removeValue(forKey: "listId")
+    content["completed"] = item.isCompleted
+    content["completionDate"] = item.completionDate?.timeIntervalSince1970 as Any? ?? NSNull()
+    let contentData = try JSONSerialization.data(withJSONObject: content, options: [.sortedKeys])
+    let contentRevision = SHA256.hash(data: contentData).map { String(format: "%02x", $0) }.joined()
     baseline["completed"] = item.isCompleted
     baseline["modifiedAt"] = item.lastModifiedDate?.timeIntervalSince1970 as Any? ?? NSNull()
     let data = try JSONSerialization.data(withJSONObject: baseline, options: [.sortedKeys])
@@ -32,7 +41,8 @@ func taskValue(_ item: EKReminder) throws -> [String: Any] {
     return ["id": item.calendarItemIdentifier, "listId": item.calendar.calendarIdentifier,
             "sourceId": item.calendar.source.sourceIdentifier,
             "title": String((item.title ?? "").prefix(200)) + ((item.title ?? "").count > 200 ? "…（标题省略）" : ""),
-            "completed": item.isCompleted, "revision": revision, "fieldsRevision": fieldsRevision]
+            "completed": item.isCompleted, "revision": revision, "fieldsRevision": fieldsRevision, "contentRevision": contentRevision,
+            "moveSupported": (item.recurrenceRules?.isEmpty ?? true) && (item.alarms?.allSatisfy({ $0.structuredLocation == nil }) ?? true)]
 }
 func calendar(_ input: [String: Any]) throws -> EKCalendar {
     let id = try string(input, "listId")
@@ -77,6 +87,45 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
         list.title = "Inbox"; list.source = source
         try store.saveCalendar(list, commit: true)
         return listValue(list)
+    }
+    if command == "resolveTaskTarget" {
+        let sourceList = try calendar(input)
+        if input["sourceOnly"] as? Bool == true {
+            var value = listValue(sourceList); value["writable"] = true
+            return ["state": "ok", "list": value]
+        }
+        let name = try string(input, "listName")
+        guard name.count <= 200, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw BridgeError(code: "INVALID_INPUT") }
+        let matches = store.calendars(for: .reminder).filter {
+            $0.source.sourceIdentifier == sourceId && $0.title.compare(name, options: .caseInsensitive) == .orderedSame
+        }
+        if matches.isEmpty { return ["state": "list_not_found"] }
+        if matches.count != 1 { return ["state": "ambiguous_list"] }
+        guard matches[0].allowsContentModifications else { throw BridgeError(code: "LIST_UNAVAILABLE") }
+        var value = listValue(matches[0]); value["writable"] = true
+        return ["state": "ok", "list": value]
+    }
+    if command == "moveTask" {
+        let list = try calendar(input)
+        var targetInput = input; targetInput["listId"] = try string(input, "targetListId")
+        let target = try calendar(targetInput)
+        let id = try string(input, "itemId"), expected = try string(input, "expectedRevision"), content = try string(input, "contentRevision")
+        _ = try marker(string(input, "operationId"))
+        guard expected.count == 64, content.count == 64, expected.allSatisfy({ $0.isHexDigit }), content.allSatisfy({ $0.isHexDigit }),
+              let item = store.calendarItem(withIdentifier: id) as? EKReminder,
+              item.calendar.source.sourceIdentifier == sourceId else { throw BridgeError(code: "ITEM_UNAVAILABLE") }
+        let current = try taskValue(item)
+        guard current["contentRevision"] as? String == content else { throw BridgeError(code: "ITEM_CHANGED") }
+        if item.calendar.calendarIdentifier == target.calendarIdentifier { return current }
+        guard item.calendar.calendarIdentifier == list.calendarIdentifier, current["revision"] as? String == expected else { throw BridgeError(code: "ITEM_CHANGED") }
+        // Unsupported structured/recurring fields are blocked rather than silently losing them.
+        guard item.recurrenceRules?.isEmpty ?? true,
+              item.alarms?.allSatisfy({ $0.structuredLocation == nil }) ?? true else { throw BridgeError(code: "UNSUPPORTED_FIELDS") }
+        item.calendar = target
+        try store.save(item, commit: true)
+        guard item.calendarItemIdentifier == id else { throw BridgeError(code: "RESULT_UNKNOWN") }
+        return try taskValue(item)
     }
     if command == "completeTask" {
         let list = try calendar(input)

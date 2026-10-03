@@ -2,7 +2,7 @@
 
 Feature: F110/T01
 Status: ready-for-agent
-State: open
+State: in-progress
 Blocked by: ../../f108-task-query/issues/05-reply-selection.md
 基准：cde064361d0326e951f9df85f479a7bbe4e30adc。
 Spec: [需求与验收基线](../../f108-task-query/maintenance-spec.md)
@@ -19,4 +19,4 @@ Spec: [需求与验收基线](../../f108-task-query/maintenance-spec.md)
 
 ## Verification
 
-仅登记任务，未实现、未运行本任务业务测试、未部署；不能以现有查询测试代替验收。
+本轮实现移动路径，基准2c1bf67；完整217/217测试、语法、Swift类型检查及合成demo:maintenance通过（5项、完成2项、移动1项、20ms、零重复写入/模型调用）。真实Apple合成写入与飞书闭环待验收，任务暂不关闭。详见[执行规格](../../f207-batch-maintenance/execution-spec.md)与[部署记录](../../../docs/deployment/f207-maintenance-2026-10-03.md)。

@@ -62,10 +62,10 @@ try {
   assert.equal(selected.total, 1);
   assert.equal((await dispatch(f, 'om_demo_missing', '小婕 gtd 查询不存在列表的任务')).status, 'query_list_not_found');
   const queryReceipt = f.sent.find(v => v.replyTo === 'om_demo_work').message_id;
-  const selectText = '第1项移动到Next清单';
+  const selectText = '选择第1项';
   f.messages.set('om_demo_select', message('om_demo_select', selectText, { parent_id: queryReceipt }));
   const selection = await f.capture.handle({ ...context('om_demo_select',selectText), ReplyToId:queryReceipt });
-  assert.equal(selection.status,'task_selection_unavailable');
+  assert.equal(selection.status,'tasks_selected');
   assert.equal(selection.selected[0].id,selected.items[0].id);
   await f.restart();
   assert.deepEqual(await f.capture.handle({ ...context('om_demo_select',selectText), ReplyToId:queryReceipt }),selection);

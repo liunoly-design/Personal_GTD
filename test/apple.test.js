@@ -143,3 +143,20 @@ test('Apple单项完成带字段基线和真实ID，非默认人工事项不进�
   await assert.rejects(apple.setReminder('manual',{},'d'.repeat(64)),/Unknown PGTD item/);
   await assert.rejects(apple.completeTask({...input,id:'other'},'c'.repeat(64)),/Operation conflict/);
 });
+
+test('Apple移动解析源目标且持久化原ID移动意图，核对目标不改默认绑定',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'pgtd-move-'));const requests=[];
+  const apple=openAppleReminders({statePath:join(dir,'state.sqlite'),sourceId:'S',listId:'Inbox',bridge:async r=>{
+    requests.push(r);if(r.command==='resolveTaskTarget')return {state:'ok',list:{id:'Next',sourceId:'S',name:'Next',writable:true}};
+    if(r.command==='readTasks')return {items:[{id:'manual',state:'ok',value:{id:'manual',listId:'Next',sourceId:'S',contentRevision:'b'.repeat(64)}}]};
+    if(r.command==='boundList')return {id:'Inbox',sourceId:'S'};return {id:'manual',listId:'Next'};
+  }});
+  t.after(()=>{apple.close();rmSync(dir,{recursive:true,force:true});});
+  assert.equal((await apple.resolveTaskTarget({name:'next',sourceListId:'Waiting'})).list.id,'Next');
+  const input={id:'manual',listId:'Waiting',targetListId:'Next',expectedRevision:'a'.repeat(64),contentRevision:'b'.repeat(64)};
+  await apple.moveTask(input,'c'.repeat(64));assert.equal(requests[1].command,'moveTask');assert.equal(requests[1].itemId,'manual');
+  assert.equal((await apple.getOperation('c'.repeat(64))).state,'applied');assert.equal((await apple.listLists())[0].id,'Inbox');
+  await assert.rejects(apple.moveTask({...input,targetListId:'Other'},'c'.repeat(64)),/Operation conflict/);
+  await assert.rejects(apple.resolveTaskTarget({name:'',sourceListId:'Waiting'}));
+  await assert.rejects(apple.setReminder('manual',{},'d'.repeat(64)),/Unknown PGTD item/);
+});

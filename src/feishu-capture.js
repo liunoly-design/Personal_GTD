@@ -1,4 +1,5 @@
 import { completeTask } from './actions/complete-task.js';
+import {maintenanceControl,proposeTaskPlan,executeTaskPlan} from './actions/task-maintenance.js';
 import { selectionCandidate, taskSelection, selectTasks } from './actions/select-tasks.js';
 import { taskQuery, queryTasks, validateQueryConfig } from './actions/query-tasks.js';
 import { openOkrSession } from './okr-session.js';
@@ -72,6 +73,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
         const query = store.get('routed-result:' + input.replyTo)?.result;
         store.set('reply:' + value.message_id, { ...source, conversationId: input.conversationId,
           rootId: source?.rootId ?? input.replyTo,
+          ...(query?.planId ? {planId:query.planId} : {}),
           ...(query?.scope && Array.isArray(query.items) ? {queryEventId:input.replyTo}
             : source?.selectionQueryEventId ? {queryEventId:source.selectionQueryEventId} : {}) });
       });
@@ -155,11 +157,19 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return deliverResult(event, { status: 'event_conflict', receipt: '同一消息 ID 的内容不一致，未新增操作。' });
     }
     const cached = store.get('routed-result:' + id);
-    if (cached && store.get('completion:'+id)?.state !== 'write_started') return deliverRouted(event, cached.result);
+    const activePlan=store.entries('maintenance:').find(([,p])=>p.state==='running'&&p.executionEvent?.id===id)?.[1];
+    if (cached && store.get('completion:'+id)?.state !== 'write_started' && !activePlan) return deliverRouted(event, cached.result);
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
       rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
     let result;
-    if (entry?.module === 'review') {
+    if ((entry?.module==='gtd'||!entry) && ((parentReceipt?.planId && (!entry||maintenanceControl(command)))
+      || (maintenanceControl(command||event.text)&&querySnapshot))) {
+      const control=maintenanceControl(command||event.text),planId=parentReceipt?.planId;
+      result=planId&&!control?{status:'task_plan_help',planId,receipt:'请回复此计划“确认执行”或“取消”。如需修改操作，请回复原任务查询回执重新提出；本次未修改事项。'}
+        : planId?await executeTaskPlan({planId,event,control,reminders,config,store,signal:options().signal})
+        : {status:'task_plan_needs_reply',receipt:'请回复机器人发出的具体操作计划确认或取消；本次未修改事项。'};
+      store.set('routed-result:'+id,{event,result});return deliverRouted(event,result);
+    } else if (entry?.module === 'review') {
       result = { status: 'review_unavailable', receipt: 'Review 功能尚未实现/启用。日/周/专题复盘及注册均待后续交付，本次未读取或写入业务记录。' };
     } else if (isOkr) {
       const instruction = explicitOkr ? (entry.module === 'okr' ? command : legacyInstruction) : '';
@@ -207,6 +217,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       };
       else if (!selection) result = {status:'task_selection_invalid',receipt:'没有看清要操作的编号和动作。可以直接回复这条提示，如“第一项标记完成”或“第一第二项完成”；单项完成已支持，批量完成尚未实现。本次未执行或创建事项。'};
       else if(selection.length===1&&selection[0].action==='complete') result=await completeTask({event,snapshot,selection,reminders,config,store,signal:options().signal});
+      else if(selection.some(x=>x.action!=='select'))result=await proposeTaskPlan({event,queryEventId,snapshot,selection,reminders,config,store,signal:options().signal});
       else result = await selectTasks({snapshot,selection,reminders,config,signal:options().signal});
       if (['task_selection_invalid','task_selection_unavailable'].includes(result.status)
         && parentReceipt?.senderId === event.senderId && parentReceipt.conversationId === event.conversationId) {
@@ -267,6 +278,12 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     },
     recover() { return enqueue(async () => {
       const results = await capture.recover();
+      for(const [,plan]of store.entries('maintenance:').filter(([,p])=>p.state==='running').slice(0,1)) {
+        const event=plan.executionEvent;
+        if(!config.allowedSenderIds.includes(event.senderId)||!config.allowedConversationIds.includes(event.conversationId))continue;
+        const result=await executeTaskPlan({planId:plan.planId,event,control:'confirm',reminders,config,store,signal:options().signal});
+        store.set('routed-result:'+event.id,{event,result});results.push(await deliverRouted(event,result));
+      }
       for (const [, record] of store.entries('completion:').filter(([,r])=>r.state==='write_started').slice(0,10)) {
         if(!config.allowedSenderIds.includes(record.event.senderId)||!config.allowedConversationIds.includes(record.event.conversationId))continue;
         const result=await completeTask({event:record.event,reminders,config,store,signal:options().signal});

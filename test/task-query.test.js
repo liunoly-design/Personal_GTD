@@ -264,20 +264,20 @@ test('自然表达查询 waiting 里面的任务，无引号且默认绑定不�
   assert.equal(f.calls,0);
 });
 
-test('可信回复查询回执按编号定位人工任务，完成移动能力缺失准确回执', async t => {
+test('可信回复查询回执按编号定位人工任务，完成移动生成具体待确认计划', async t => {
   const f = fixture(t);
-  const list = await f.reminders.createList('Waiting','select-waiting');
+  const list = await f.reminders.createList('Waiting','select-waiting'); await f.reminders.createList('Next','select-next');
   for (let i=0;i<5;i++) await f.reminders.createItem({listId:list.id,title:'合成等待事项'},'select-item-'+i);
   const query = await dispatch(f,'om_select_query','小婕 gtd 查询Waiting里面的任务');
   const replyId=f.sent.at(-1).message_id;
   const text='帮我确认第 1,2项都完成，第 5 项移动到 next 清单';
   f.messages.set('om_select_reply',message('om_select_reply',text,{parent_id:replyId}));
   const r=await f.capture.handle({...context('om_select_reply',text),ReplyToId:replyId});
-  assert.equal(r.status,'task_selection_unavailable');
+  assert.equal(r.status,'task_plan_ready');
   assert.deepEqual(r.selected.map(x=>[x.number,x.id,x.action,x.targetListName]),[
     [1,query.items[0].id,'complete',undefined],[2,query.items[1].id,'complete',undefined],[5,query.items[4].id,'move','next']]);
-  assert.match(r.receipt,/完成.*移动.*尚未实现/s);
-  assert.match(r.receipt,/未执行/);
+  assert.match(r.receipt,/完成.*移动.*确认执行/s);
+  assert.match(r.receipt,/未修改/);
   assert.doesNotMatch(r.receipt,/sim-item-|sim-list-|确认后|无.*权限/);
   assert.equal((await f.reminders.listItems()).length,5);
   assert.equal(f.calls,0);
@@ -378,8 +378,8 @@ test('缺回执关联的编号指令由PGTD提示重新查询，不落普通助�
   assert.equal((await f.reminders.listItems()).length,0);assert.equal(f.calls,0);
 });
 
-test('真实插件公开hook接管无前缀编号回复，准确缺能力回执而无宿主最终回答', async t=>{
-  const f=fixture(t);const list=await f.reminders.createList('Inbox','hook-list');await f.reminders.createItem({listId:list.id,title:'合成hook事项'},'hook-item');
+test('真实插件公开hook接管无前缀编号回复，生成待确认计划而无宿主最终回答', async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','hook-list');await f.reminders.createList('Next','hook-next');await f.reminders.createItem({listId:list.id,title:'合成hook事项'},'hook-item');
   await dispatch(f,'om_hook_query','小婕 gtd 查询任务');const replyId=f.sent.at(-1).message_id;
   const text='第1项移动到Next清单';f.messages.set('om_hook_select',message('om_hook_select',text,{parent_id:replyId}));
   let hook;const hostReplies=[],processed=[];
@@ -387,8 +387,8 @@ test('真实插件公开hook接管无前缀编号回复，准确缺能力回执�
   const result=await hook({ctx:{...context('om_hook_select',text),ReplyToId:replyId},sendPolicy:'allow'}, {
     recordProcessed(...args){processed.push(args);},markIdle(){},dispatcher:{getQueuedCounts(){return{};},sendFinalReply(reply){hostReplies.push(reply);return true;}}});
   assert.equal(result.handled,true);assert.equal(result.queuedFinal,false);
-  assert.equal(hostReplies.length,0);assert.match(processed[0][1].reason,/task_selection_unavailable/);
-  assert.match(f.sent.at(-1).text,/尚未实现.*未执行/s);assert.equal(f.calls,0);
+  assert.equal(hostReplies.length,0);assert.match(processed[0][1].reason,/task_plan_ready/);
+  assert.match(f.sent.at(-1).text,/确认执行.*未修改/s);assert.equal(f.calls,0);
 });
 test('定位结果回执发送未知后恢复不重读，预算限制超10项不读取或写入', async t=>{
   const f=fixture(t,{failReplyFor:'om_recover_select'});const list=await f.reminders.createList('Inbox','recover-select-list');
@@ -472,12 +472,12 @@ test('未能证明完成的未知写入只核对，权限明确拒绝和外部�
   assert.equal((await replySelection(f,'om_failed_conflict',completeText,freshReceipt)).status,'task_completion_conflict');assert.equal(writes,2);
   assert.equal(Boolean((await f.reminders.getItem(item.id)).completed),false);
 });
-test('多个完成及完成移动混合请求不部分执行，完成成功但回执未知不重写',async t=>{
-  const f=fixture(t,{failReplyFor:'om_receipt_complete'});const list=await f.reminders.createList('Inbox','mixed-complete-list');
+test('多个完成及完成移动混合请求确认前不执行，完成成功但回执未知不重写',async t=>{
+  const f=fixture(t,{failReplyFor:'om_receipt_complete'});const list=await f.reminders.createList('Inbox','mixed-complete-list');await f.reminders.createList('Next','mixed-next');
   for(let i=0;i<2;i++)await f.reminders.createItem({listId:list.id,title:'合成批量完成'+i},'mixed-complete'+i);
   await dispatch(f,'om_mixed_complete_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
   const complete=f.reminders.completeTask.bind(f.reminders);let writes=0;f.reminders.completeTask=async(...args)=>{writes++;return complete(...args);};
-  for(const [i,text]of['第1,2项完成','第1项完成，第2项移动到Next清单'].entries())assert.equal((await replySelection(f,'om_mixed_none'+i,text,receipt)).status,'task_selection_unavailable');
+  for(const [i,text]of['第1,2项完成','第1项完成，第2项移动到Next清单'].entries())assert.equal((await replySelection(f,'om_mixed_none'+i,text,receipt)).status,'task_plan_ready');
   assert.equal(writes,0);
   const result=await replySelection(f,'om_receipt_complete','完成第1项',receipt);assert.equal(result.status,'task_completed');assert.equal(result.delivery,'pending');assert.equal(writes,1);
   await f.restart();await f.capture.recover();assert.equal(writes,1);assert.equal((await f.reminders.listItems()).filter(i=>i.completed).length,1);assert.equal(f.calls,0);
@@ -516,7 +516,7 @@ test('自然中文和连续编号识别批量意图，不误写入',async t=>{
   let writes=0;f.reminders.completeTask=async()=>{writes++;throw new Error('unexpected write');};
   for(const [i,text]of ['第一第二任务标记完成','第1第2项任务标记完成','第一、第二项都完成','第 1 第 2 项标记完成'].entries()){
     const result=await replySelection(f,'om_natural'+i,text,receipt);
-    assert.equal(result.status,'task_selection_unavailable',text);assert.deepEqual(result.selected.map(x=>x.number),[1,2]);
+    assert.equal(result.status,'task_plan_ready',text);assert.deepEqual(result.selected.map(x=>x.number),[1,2]);
   }
   assert.equal((await replySelection(f,'om_natural_bare','第1第2',receipt)).status,'tasks_selected');
   assert.equal((await dispatch(f,'om_natural_unlinked','第1第2')).status,'task_selection_needs_query');
@@ -530,9 +530,9 @@ test('回复编号澄清提示可纠正原查询，重启保留关联且不继�
   assert.equal((await replySelection(f,'om_clarify_invalid','第一第二任务标记完成啊',receipt)).status,'task_selection_invalid');
   const prompt=f.sent.at(-1).message_id;await f.restart();
   const batch=await replySelection(f,'om_clarify_fixed','第1第2项任务标记完成',prompt);
-  assert.equal(batch.status,'task_selection_unavailable');assert.deepEqual(batch.selected.map(x=>x.number),[1,2]);
+  assert.equal(batch.status,'task_plan_ready');assert.deepEqual(batch.selected.map(x=>x.number),[1,2]);
   const unavailable=f.sent.at(-1).message_id;
-  assert.equal((await replySelection(f,'om_clarify_single','第一项标记完成',unavailable)).status,'task_completed');
+  assert.equal((await replySelection(f,'om_clarify_single','第一项标记完成',receipt)).status,'task_completed');
   const completed=f.sent.at(-1).message_id;
   assert.equal((await replySelection(f,'om_clarify_noinherit','第二项完成',completed)).status,'task_selection_needs_query');
   assert.equal(f.calls,0);
@@ -553,4 +553,75 @@ test('自然编号澄清关联不越权、不改跟新查询，含否定或重�
   await dispatch(f,'om_natural_safe_new','小婕 gtd 查询任务');
   assert.equal((await replySelection(f,'om_natural_safe_oldpage','第二项完成',prompt)).status,'task_selection_needs_query');
   assert.equal((await f.reminders.listItems()).filter(x=>x.completed).length,0);assert.equal(f.calls,0);
+});
+
+test('混合批量先计划，确认后两完成一移动并保持ID字段及默认绑定',async t=>{
+  const f=fixture(t);const source=await f.reminders.createList('Waiting','batch-source'),target=await f.reminders.createList('Next','batch-target');
+  for(let i=0;i<5;i++)await f.reminders.createItem({listId:source.id,title:'合成批量'+i,notes:'合成保留字段'},'batch-item'+i);
+  const query=await dispatch(f,'om_batch_query','小婕 gtd 查询 Waiting 里面的任务');const receipt=f.sent.at(-1).message_id;
+  const plan=await replySelection(f,'om_batch_plan','第一第二项完成，第五项移动到next清单',receipt);
+  assert.equal(plan.status,'task_plan_ready');assert.equal((await f.reminders.listItems()).filter(x=>x.completed||x.listId===target.id).length,0);
+  const planReply=f.sent.at(-1).message_id;await f.restart();
+  const result=await replySelection(f,'om_batch_confirm','确认执行',planReply);assert.equal(result.status,'task_plan_completed');
+  const summary=f.sent.at(-1).message_id;assert.equal((await replySelection(f,'om_batch_summary_confirm','确认执行',summary)).status,'task_plan_completed');
+  const items=await f.reminders.listItems();assert.equal(items.filter(x=>x.completed).length,2);
+  assert.equal(items.find(x=>x.id===query.items[4].id).listId,target.id);assert.ok(items.every(x=>x.notes==='合成保留字段'));
+  assert.deepEqual(await replySelection(f,'om_batch_confirm','确认执行',planReply),result);
+  assert.equal(f.calls,0);
+});
+
+async function batchFixture(t,options={}) {
+  const f=fixture(t,options),source=await f.reminders.createList('Waiting','guard-source');await f.reminders.createList('Next','guard-target');
+  for(let i=0;i<3;i++)await f.reminders.createItem({listId:source.id,title:'合成保护任务'+i,notes:'合成字段'},'guard-item'+i);
+  await dispatch(f,'om_guard_query','小婕 gtd 查询 Waiting 里面的任务');f.queryReply=f.sent.at(-1).message_id;return f;
+}
+test('批量取消、新计划替代、错误身份与非计划确认均零写入',async t=>{
+  const f=await batchFixture(t,{config:{allowedSenderIds:['ou_test','ou_other']}});
+  let writes=0;f.reminders.completeTask=async()=>{writes++;throw new Error('unexpected');};
+  assert.equal((await replySelection(f,'om_guard_noplan','确认执行',f.queryReply)).status,'task_plan_needs_reply');
+  await replySelection(f,'om_guard_old','第一第二项完成',f.queryReply);const old=f.sent.at(-1).message_id;
+  await replySelection(f,'om_guard_new','第一第二项完成',f.queryReply);const fresh=f.sent.at(-1).message_id;
+  assert.equal((await replySelection(f,'om_guard_stale','确认执行',old)).status,'task_plan_blocked');
+  const other=await replySelection(f,'om_guard_other','小婕 gtd 确认执行',fresh,{sender:{id:'ou_other',id_type:'open_id',sender_type:'user'}},{SenderId:'ou_other'});
+  assert.equal(other.status,'task_plan_blocked');assert.doesNotMatch(other.receipt,/合成保护任务/);
+  assert.equal((await replySelection(f,'om_guard_cancel','取消',fresh)).status,'task_plan_cancelled');
+  assert.equal((await replySelection(f,'om_guard_aftercancel','确认执行',fresh)).status,'task_plan_blocked');assert.equal(writes,0);
+});
+test('批量确认重新核对全计划，目标歧义、源目标无权限或外部编辑不部分写入',async t=>{
+  const f=await batchFixture(t);let writes=0;f.reminders.completeTask=async()=>{writes++;throw new Error('unexpected');};
+  await replySelection(f,'om_guard_changeplan','第一第二项完成，第三项移动到Next清单',f.queryReply);const plan=f.sent.at(-1).message_id;
+  const read=f.reminders.readTasks.bind(f.reminders);f.reminders.readTasks=async(...args)=>{const r=await read(...args);r.items[0].value.revision='a'.repeat(64);return r;};
+  assert.equal((await replySelection(f,'om_guard_changed','确认执行',plan)).status,'task_plan_blocked');f.reminders.readTasks=read;
+  await f.reminders.createList('Next','guard-duplicate');
+  assert.equal((await replySelection(f,'om_guard_ambiguous','第一项移动到Next清单',f.queryReply)).status,'task_plan_blocked');
+  f.reminders.resolveTaskTarget=async()=>{throw Object.assign(new Error('denied'),{reason:'PERMISSION_DENIED'});};
+  assert.equal((await replySelection(f,'om_guard_denied','第一第二项完成',f.queryReply)).status,'task_plan_blocked');assert.equal(writes,0);
+});
+test('批量部分成功及未知移动响应只核对，重启和重复确认不重放成功项',async t=>{
+  const f=await batchFixture(t);const complete=f.reminders.completeTask.bind(f.reminders),move=f.reminders.moveTask.bind(f.reminders);let completes=0,moves=0,failReads=false;
+  f.reminders.completeTask=async(...args)=>{completes++;if(completes===2)throw Object.assign(new Error('denied'),{code:'WRITE_REJECTED',reason:'PERMISSION_DENIED'});return complete(...args);};
+  f.reminders.moveTask=async(...args)=>{moves++;await move(...args);failReads=true;throw new Error('lost response');};
+  const read=f.reminders.readTasks.bind(f.reminders);f.reminders.readTasks=async(...args)=>{if(failReads)throw new Error('unavailable');return read(...args);};
+  await replySelection(f,'om_partial_plan','第一第二项完成，第三项移动到Next清单',f.queryReply);const receipt=f.sent.at(-1).message_id;
+  const result=await replySelection(f,'om_partial_confirm','确认执行',receipt);assert.equal(result.status,'task_plan_unknown');assert.match(result.receipt,/明确拒绝/);assert.equal(completes,2);assert.equal(moves,1);
+  await f.restart();await f.capture.recover();assert.equal(completes,2);assert.equal(moves,1);
+  assert.equal((await replySelection(f,'om_partial_new','第三项完成',f.queryReply)).status,'task_completion_unknown');
+  failReads=false;await f.capture.recover();const replay=await replySelection(f,'om_partial_confirm','确认执行',receipt);
+  assert.equal(replay.status,'task_plan_partial');assert.match(replay.receipt,/已移动.*核验/);assert.equal(completes,2);assert.equal(moves,1);
+});
+test('批量已核验后回执未知只恢复回执，单项原地移动同样先确认',async t=>{
+  const f=await batchFixture(t,{failReplyFor:'om_move_confirm'});let moves=0;const move=f.reminders.moveTask.bind(f.reminders);f.reminders.moveTask=async(...args)=>{moves++;return move(...args);};
+  assert.equal((await replySelection(f,'om_move_plan','第一项移动到Next清单',f.queryReply)).status,'task_plan_ready');const receipt=f.sent.at(-1).message_id;
+  const result=await replySelection(f,'om_move_confirm','确认执行',receipt);assert.equal(result.status,'task_plan_completed');assert.equal(result.delivery,'pending');assert.equal(moves,1);
+  await f.restart();await f.capture.recover();assert.equal(moves,1);assert.equal(f.calls,0);
+});
+
+test('计划中的未识别确认不默认收集，原地目标无写入，移动字段核验失败保持未知',async t=>{
+  const f=await batchFixture(t);let moves=0;const move=f.reminders.moveTask.bind(f.reminders);f.reminders.moveTask=async(...args)=>{moves++;return move(...args);};
+  await replySelection(f,'om_same_plan','第一项移动到Waiting清单',f.queryReply);const same=f.sent.at(-1).message_id;
+  assert.equal((await replySelection(f,'om_same_help','确认这些',same)).status,'task_plan_help');assert.equal(f.calls,0);
+  assert.equal((await replySelection(f,'om_same_confirm','确认执行',same)).status,'task_plan_completed');assert.equal(moves,0);
+  await replySelection(f,'om_fields_plan','第二项移动到Next清单',f.queryReply);const parent=f.sent.at(-1).message_id;
+  const read=f.reminders.readTasks.bind(f.reminders);f.reminders.readTasks=async(...args)=>{const r=await read(...args);if(moves&&r.items[0]?.value)r.items[0].value.contentRevision='f'.repeat(64);return r;};
+  assert.equal((await replySelection(f,'om_fields_confirm','确认执行',parent)).status,'task_plan_unknown');await f.restart();await f.capture.recover();assert.equal(moves,1);
 });

@@ -25,7 +25,7 @@ export function callApple(input, { signal, timeoutMs = 15000, helperPath = binar
       try {
         const response = JSON.parse(output);
         if (!response.ok) {
-          const denied = ['PERMISSION_DENIED', 'SOURCE_UNAVAILABLE', 'LIST_UNAVAILABLE', 'ITEM_UNAVAILABLE', 'PAST_TIME', 'INVALID_INPUT', 'ITEM_CHANGED'];
+          const denied = ['PERMISSION_DENIED', 'SOURCE_UNAVAILABLE', 'LIST_UNAVAILABLE', 'ITEM_UNAVAILABLE', 'PAST_TIME', 'INVALID_INPUT', 'ITEM_CHANGED', 'UNSUPPORTED_FIELDS'];
           const reason = denied.includes(response.code) ? response.code : 'APPLE_FAILURE';
           finish(Object.assign(new Error(reason), { code: denied.includes(response.code) ? 'WRITE_REJECTED' : 'RESULT_UNKNOWN', reason }));
         } else finish(null, response.value);
@@ -80,6 +80,19 @@ export function openAppleReminders({ statePath, sourceId, listId, helperPath, br
       store.set('operation:'+operationId,request);
       return bridge(request,options);
     },
+    async resolveTaskTarget({name,sourceListId,sourceOnly=false},options) {
+      if((!sourceOnly&&(typeof name!=='string'||!name.trim()||[...name].length>200||/[\x00-\x1f]/u.test(name)))
+        ||typeof sourceListId!=='string'||!sourceListId||sourceListId.length>1024||/[\x00-\x1f]/u.test(sourceListId))throw new Error('Invalid target input');
+      return bridge({command:'resolveTaskTarget',sourceId,listId:sourceListId,...(sourceOnly?{sourceOnly:true}:{listName:name})},options);
+    },
+    async moveTask({id,listId,targetListId,expectedRevision,contentRevision},operationId,options) {
+      if([id,listId,targetListId].some(v=>typeof v!=='string'||!v||v.length>1024||/[\x00-\x1f]/u.test(v))
+        ||![expectedRevision,contentRevision,operationId].every(v=>/^[a-f0-9]{64}$/u.test(v??'')))throw new Error('Invalid move input');
+      const request={command:'moveTask',sourceId,operationId,itemId:id,listId,targetListId,expectedRevision,contentRevision};
+      const old=store.get('operation:'+operationId);
+      if(old&&JSON.stringify(old)!==JSON.stringify(request))throw new Error('Operation conflict');
+      store.set('operation:'+operationId,request);return bridge(request,options);
+    },
     async readTasks({ items }, options) {
       const safeId = value => typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\r\n\x00-\x1f]/u.test(value);
       if (!Array.isArray(items) || items.length < 1 || items.length > 10
@@ -119,6 +132,10 @@ export function openAppleReminders({ statePath, sourceId, listId, helperPath, br
     async getOperation(operationId, options) {
       const request = store.get('operation:' + operationId);
       if (!request) return { state: 'unknown' };
+      if(request.command==='moveTask') {
+        const row=(await bridge({command:'readTasks',sourceId,items:[{id:request.itemId,listId:request.targetListId}]},options)).items?.[0];
+        return row?.state==='ok'&&row.value?.id===request.itemId&&row.value.listId===request.targetListId&&row.value.sourceId===sourceId&&row.value.contentRevision===request.contentRevision?{state:'applied',value:row.value}:{state:'unknown'};
+      }
       if(request.command==='completeTask') {
         const row=(await bridge({command:'readTasks',sourceId,items:[{id:request.itemId,listId:request.listId}]},options)).items?.[0];
         return row?.state==='ok'&&row.value?.id===request.itemId&&row.value.listId===request.listId&&row.value.sourceId===sourceId&&row.value.completed===true&&row.value.fieldsRevision===request.fieldsRevision ? {state:'applied',value:row.value} : {state:'unknown'};

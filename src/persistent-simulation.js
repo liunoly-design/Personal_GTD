@@ -22,6 +22,7 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
   }
   const revision = item => createHash('sha256').update(JSON.stringify(item)).digest('hex');
   const fieldsRevision = ({completed,completionDate,...fields}) => revision(fields);
+  const contentRevision = ({id,listId,...fields}) => revision(fields);
   const service = {
     async getOperation(id) {
       const record = store.get('operation:' + id);
@@ -41,13 +42,27 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       const items = all.filter(item => item.listId === list.id && !item.completed)
         .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
       return { state: 'ok', list: { ...list, sourceId: 'sim-source' }, total: items.length, hasMore: offset + limit < items.length,
-        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false, revision:revision(item), fieldsRevision:fieldsRevision(item) })) };
+        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false, revision:revision(item), fieldsRevision:fieldsRevision(item),contentRevision:contentRevision(item) })) };
     },
     async readTasks({items}) {
       return {items:items.map(({id,listId}) => {
         const item=store.get('item:' + id);
-        return !item || item.listId !== listId ? {id,state:'unavailable'} : {id,state:'ok',value:{id,listId,sourceId:'sim-source',title:item.title,completed:Boolean(item.completed),revision:revision(item),fieldsRevision:fieldsRevision(item)}};
+        return !item || item.listId !== listId ? {id,state:'unavailable'} : {id,state:'ok',value:{id,listId,sourceId:'sim-source',title:item.title,completed:Boolean(item.completed),revision:revision(item),fieldsRevision:fieldsRevision(item),contentRevision:contentRevision(item)}};
       })};
+    },
+    async resolveTaskTarget({name,sourceListId,sourceOnly=false}) {
+      if(!store.get('list:'+sourceListId))throw new Error('Source unavailable');
+      if(sourceOnly)return {state:'ok',list:{...store.get('list:'+sourceListId),sourceId:'sim-source',writable:true}};
+      const lists=store.entries('list:').map(([,v])=>v).filter(v=>v.name.toLowerCase()===name.toLowerCase());
+      return {state:lists.length===1?'ok':lists.length?'ambiguous_list':'list_not_found',...(lists.length===1?{list:{...lists[0],sourceId:'sim-source',writable:true}}:{})};
+    },
+    async moveTask(input,operationId) {
+      return write('move',input,operationId,()=>{
+        const item=store.get('item:'+input.id);
+        if(!item||item.listId!==input.listId||!store.get('list:'+input.targetListId))throw Object.assign(new Error('Item unavailable'),{code:'WRITE_REJECTED',reason:'ITEM_UNAVAILABLE'});
+        if(revision(item)!==input.expectedRevision||contentRevision(item)!==input.contentRevision)throw Object.assign(new Error('Item changed'),{code:'WRITE_REJECTED',reason:'ITEM_CHANGED'});
+        const value={...item,listId:input.targetListId};store.set('item:'+item.id,value);return value;
+      });
     },
     async completeTask(input,operationId) {
       return write('complete',input,operationId,()=>{

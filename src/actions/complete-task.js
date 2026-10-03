@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-async function bounded(call, timeoutMs, signal) {
+export async function bounded(call, timeoutMs, signal) {
   const controller=new AbortController(), combined=AbortSignal.any([controller.signal,...(signal?[signal]:[])]);
   let timer,onAbort;
   try {
@@ -36,6 +36,7 @@ export async function completeTask({event,snapshot,selection,reminders,config,st
     return unknown();
   };
   if(!record && store.entries('completion:').some(([,r])=>r.state==='write_started'&&r.reference.id===reference.id&&r.reference.sourceId===reference.sourceId))return unknown();
+  if(!record && store.entries('maintenance:').some(([,p])=>p.actions.some(a=>a.state==='write_started'&&a.reference.id===reference.id&&a.reference.sourceId===reference.sourceId)))return unknown();
   if(record?.state==='done')return record.result??unknown();
   if(record?.state==='write_started')return reconcile();
   let current;
