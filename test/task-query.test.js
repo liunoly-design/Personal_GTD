@@ -381,7 +381,7 @@ test('缺回执关联的编号指令由PGTD提示重新查询，不落普通助�
 test('真实插件公开hook接管无前缀编号回复，准确缺能力回执而无宿主最终回答', async t=>{
   const f=fixture(t);const list=await f.reminders.createList('Inbox','hook-list');await f.reminders.createItem({listId:list.id,title:'合成hook事项'},'hook-item');
   await dispatch(f,'om_hook_query','小婕 gtd 查询任务');const replyId=f.sent.at(-1).message_id;
-  const text='第1项完成';f.messages.set('om_hook_select',message('om_hook_select',text,{parent_id:replyId}));
+  const text='第1项移动到Next清单';f.messages.set('om_hook_select',message('om_hook_select',text,{parent_id:replyId}));
   let hook;const hostReplies=[],processed=[];
   createPlugin({openRuntime:async()=>f.capture}).register({pluginConfig:{...scope,enabled:true},config:{},registerService(){},logger:{info(){},warn(){}},on(name,fn){assert.equal(name,'reply_dispatch');hook=fn;}});
   const result=await hook({ctx:{...context('om_hook_select',text),ReplyToId:replyId},sendPolicy:'allow'}, {
@@ -426,5 +426,85 @@ test('同消息ID改换引用目标不能借原查询根ID复用定位成功', a
   await dispatch(f,'om_parent_query','小婕 gtd 查询任务');const replyId=f.sent.at(-1).message_id;
   assert.equal((await replySelection(f,'om_parent_select','选择第1项',replyId)).status,'tasks_selected');
   assert.equal((await replySelection(f,'om_parent_select','选择第1项','om_parent_query')).status,'event_conflict');
+  assert.equal((await f.reminders.listItems()).length,1);assert.equal(f.calls,0);
+});
+
+test('可信单项完成原人工事项并读回，字段与绑定不变，重投不重复写入',async t=>{
+  const f=fixture(t);const inbox=await f.reminders.createList('Inbox','complete-inbox');const waiting=await f.reminders.createList('Waiting','complete-waiting');
+  const item=await f.reminders.createItem({listId:waiting.id,title:'合成完成任务',notes:'保留原备注'},'complete-item');
+  await f.reminders.setReminder(item.id,{remindAt:'2026-10-04T02:00:00Z'},'seed-alarm');
+  await f.reminders.createItem({listId:inbox.id,title:'默认事项'},'default-complete');
+  await dispatch(f,'om_complete_query','小婕 gtd 查询Waiting里面的任务');const receipt=f.sent.at(-1).message_id;
+  const result=await replySelection(f,'om_complete_one','第1项完成',receipt);
+  assert.equal(result.status,'task_completed');assert.equal(result.item.id,item.id);
+  assert.equal(result.item.completed,true);assert.match(result.receipt,/已完成/);
+  const actual=await f.reminders.getItem(item.id);assert.equal(actual.completed,true);assert.equal(actual.notes,'保留原备注');assert.equal(actual.remindAt,'2026-10-04T02:00:00Z');assert.equal(actual.listId,waiting.id);
+  await f.restart();assert.deepEqual(await replySelection(f,'om_complete_one','第1项完成',receipt),result);
+  assert.equal((await replySelection(f,'om_complete_again','第1项完成',receipt)).status,'task_already_completed');
+  assert.equal((await dispatch(f,'om_complete_default','小婕 gtd 查询任务')).scope.listId,inbox.id);
+  assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,2);
+});
+
+test('完成写入响应丢失已读回则成功，核对失败重启后只读恢复不重复完成',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','unknown-complete-list');const item=await f.reminders.createItem({listId:list.id,title:'合成未知完成'},'unknown-complete-item');
+  await dispatch(f,'om_unknown_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  const complete=f.reminders.completeTask.bind(f.reminders),read=f.reminders.readTasks.bind(f.reminders);let writes=0,failRead=false;
+  f.reminders.completeTask=async(...args)=>{writes++;await complete(...args);failRead=true;throw new Error('Lost response');};
+  f.reminders.readTasks=async(...args)=>{if(failRead)throw new Error('Read unavailable');return read(...args);};
+  const first=await replySelection(f,'om_unknown_complete','第1项完成',receipt);assert.equal(first.status,'task_completion_unknown');assert.equal(writes,1);
+  await f.restart();assert.equal((await replySelection(f,'om_unknown_complete','第1项完成',receipt)).status,'task_completion_unknown');assert.equal(writes,1);
+  failRead=false;const recovered=await f.capture.recover();assert.ok(recovered.some(r=>r.status==='task_completed'));assert.equal(writes,1);
+  assert.equal((await f.reminders.getItem(item.id)).completed,true);
+  const replay=await replySelection(f,'om_unknown_complete','第1项完成',receipt);assert.equal(replay.status,'task_completed');assert.equal(writes,1);
+});
+test('未能证明完成的未知写入只核对，权限明确拒绝和外部冲突不写入',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','failed-complete-list');const item=await f.reminders.createItem({listId:list.id,title:'合成拒绝完成'},'failed-complete-item');
+  await dispatch(f,'om_failed_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  let writes=0;f.reminders.completeTask=async()=>{writes++;throw new Error('Timeout before or after write unknown');};
+  assert.equal((await replySelection(f,'om_failed_unknown','第1项完成',receipt)).status,'task_completion_unknown');
+  await f.restart();await f.capture.recover();await replySelection(f,'om_failed_unknown','第1项完成',receipt);assert.equal(writes,1);
+  const second=await f.reminders.createItem({listId:list.id,title:'合成权限拒绝'},'denied-second-item');
+  const fresh=await dispatch(f,'om_denied_fresh_query','小婕 gtd 查询任务');const freshReceipt=f.sent.at(-1).message_id;
+  const completeText='第'+(fresh.items.findIndex(i=>i.id===second.id)+1)+'项完成';
+  f.reminders.completeTask=async()=>{writes++;throw Object.assign(new Error('Denied'),{code:'WRITE_REJECTED',reason:'PERMISSION_DENIED'});};
+  const denied=await replySelection(f,'om_failed_denied',completeText,freshReceipt);assert.equal(denied.status,'task_completion_failed');assert.equal(denied.code,'PERMISSION_DENIED');assert.equal(writes,2);
+  await f.reminders.setReminder(second.id,{notes:'外部编辑'},'external-complete-edit');
+  assert.equal((await replySelection(f,'om_failed_conflict',completeText,freshReceipt)).status,'task_completion_conflict');assert.equal(writes,2);
+  assert.equal(Boolean((await f.reminders.getItem(item.id)).completed),false);
+});
+test('多个完成及完成移动混合请求不部分执行，完成成功但回执未知不重写',async t=>{
+  const f=fixture(t,{failReplyFor:'om_receipt_complete'});const list=await f.reminders.createList('Inbox','mixed-complete-list');
+  for(let i=0;i<2;i++)await f.reminders.createItem({listId:list.id,title:'合成批量完成'+i},'mixed-complete'+i);
+  await dispatch(f,'om_mixed_complete_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  const complete=f.reminders.completeTask.bind(f.reminders);let writes=0;f.reminders.completeTask=async(...args)=>{writes++;return complete(...args);};
+  for(const [i,text]of['第1,2项完成','第1项完成，第2项移动到Next清单'].entries())assert.equal((await replySelection(f,'om_mixed_none'+i,text,receipt)).status,'task_selection_unavailable');
+  assert.equal(writes,0);
+  const result=await replySelection(f,'om_receipt_complete','完成第1项',receipt);assert.equal(result.status,'task_completed');assert.equal(result.delivery,'pending');assert.equal(writes,1);
+  await f.restart();await f.capture.recover();assert.equal(writes,1);assert.equal((await f.reminders.listItems()).filter(i=>i.completed).length,1);assert.equal(f.calls,0);
+});
+
+test('完成结果未知恢复期间撤回用户授权，不能继续读取或写入',async t=>{
+  const options={config:{allowedSenderIds:['ou_test']}};const f=fixture(t,options);const list=await f.reminders.createList('Inbox','revoke-complete-list');await f.reminders.createItem({listId:list.id,title:'合成撤权事项'},'revoke-complete-item');
+  await dispatch(f,'om_revoke_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  let writes=0,reads=0;const read=f.reminders.readTasks.bind(f.reminders);f.reminders.readTasks=async(...a)=>{reads++;return read(...a);};f.reminders.completeTask=async()=>{writes++;throw new Error('Unknown');};
+  assert.equal((await replySelection(f,'om_revoke_complete','第1项完成',receipt)).status,'task_completion_unknown');const prior=reads;
+  options.config.allowedSenderIds=['ou_other'];await f.restart();await f.capture.recover();assert.equal(reads,prior);assert.equal(writes,1);
+  assert.equal((await replySelection(f,'om_revoke_complete','第1项完成',receipt)).status,'not_handled');
+});
+
+test('同一事项有未知完成操作时，换新消息不能绕过核对重写',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','pending-item-list');await f.reminders.createItem({listId:list.id,title:'合成待核对完成'},'pending-item');
+  await dispatch(f,'om_pending_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  let writes=0;f.reminders.completeTask=async()=>{writes++;throw new Error('Unknown write');};
+  assert.equal((await replySelection(f,'om_pending_one','第1项完成',receipt)).status,'task_completion_unknown');
+  assert.equal((await replySelection(f,'om_pending_two','第1项完成',receipt)).status,'task_completion_unknown');assert.equal(writes,1);
+});
+
+test('带激活前缀但未支持的完成措辞不被默认收集',async t=>{
+  const f=fixture(t);const list=await f.reminders.createList('Inbox','unsupported-complete-list');await f.reminders.createItem({listId:list.id,title:'合成措辞任务'},'unsupported-complete-item');
+  await dispatch(f,'om_unsupported_query','小婕 gtd 查询任务');const receipt=f.sent.at(-1).message_id;
+  for(const [i,text]of['小婕 gtd 把第1项标记完成','小婕 gtd 将第1项移动到Next清单'].entries()){
+    const result=await replySelection(f,'om_unsupported_text'+i,text,receipt);assert.equal(result.status,'task_selection_invalid');
+  }
   assert.equal((await f.reminders.listItems()).length,1);assert.equal(f.calls,0);
 });

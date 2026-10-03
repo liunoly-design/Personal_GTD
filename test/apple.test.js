@@ -132,3 +132,14 @@ test('Apple按快照引用只读核对非默认人工事项，不开放原写入
     await assert.rejects(apple.readTasks({items}),/Invalid task references/);
   }
 });
+
+test('Apple单项完成带字段基线和真实ID，非默认人工事项不进入旧提醒写入索引',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'pgtd-complete-bridge-'));const requests=[];
+  const apple=openAppleReminders({statePath:join(dir,'state.sqlite'),sourceId:'S',listId:'Inbox',bridge:async r=>{requests.push(r);return {id:'manual',listId:'Waiting',sourceId:'S',completed:true};}});
+  t.after(()=>{apple.close();rmSync(dir,{recursive:true,force:true});});
+  const input={id:'manual',listId:'Waiting',expectedRevision:'a'.repeat(64),fieldsRevision:'b'.repeat(64)};
+  assert.equal((await apple.completeTask(input,'c'.repeat(64))).completed,true);
+  assert.deepEqual(requests[0],{command:'completeTask',sourceId:'S',operationId:'c'.repeat(64),itemId:'manual',listId:'Waiting',expectedRevision:input.expectedRevision,fieldsRevision:input.fieldsRevision});
+  await assert.rejects(apple.setReminder('manual',{},'d'.repeat(64)),/Unknown PGTD item/);
+  await assert.rejects(apple.completeTask({...input,id:'other'},'c'.repeat(64)),/Operation conflict/);
+});

@@ -1,7 +1,8 @@
 // Complete numbered reply forms only. This module locates objects; it performs no writes.
 export function selectionCandidate(text) {
   return typeof text === 'string'
-    && /^(?:请)?(?:帮我)?(?:确认)?(?:选择|选中|选|查看|看看|完成|标记完成|移动|删除)?\s*第\s*[+-]?[0-9]/u.test(text.trim());
+    && /^(?:请)?(?:帮我)?(?:确认)?(?:选择|选中|选|查看|看看|完成|标记完成|移动|删除)?\s*第\s*[+-]?[0-9]/u.test(text.trim())
+    || (typeof text==='string' && /^(?:请)?(?:帮我)?(?:把|将|标记)/u.test(text.trim()) && /第\s*[0-9]+/u.test(text) && /完成|移动|删除|重开/u.test(text));
 }
 export function taskSelection(text) {
   let rest = text.trim().replace(/^(?:请)?(?:帮我)?(?:确认)?\s*/u, '').replace(/[。！!]$/u, '');
@@ -65,7 +66,7 @@ export async function selectTasks({ snapshot, selection, reminders, config, sign
     return { status: maintenance ? 'task_selection_unavailable' : 'tasks_selected', selected, queryReadAt:snapshot.readAt,
       receipt: '已定位所选事项：\n' + selected.map(item => `${item.number}. ${item.title}`
         + (item.action==='complete' ? '（请求完成）' : item.action==='move' ? `（请求移动到 ${item.targetListName}）` : '')).join('\n')
-        + (maintenance ? '\n\n完成、移动及批量执行尚未实现，本次未执行或修改事项。' : '\n\n本次仅定位，未修改事项。') };
+        + (maintenance ? '\n\n单项完成已支持；移动及批量执行尚未实现，本次未执行或修改事项。' : '\n\n本次仅定位，未修改事项。') };
   } catch (error) {
     return {status:'task_selection_failed',code:error?.reason==='PERMISSION_DENIED' ? 'PERMISSION_DENIED' : error?.code==='QUERY_TIMEOUT' ? 'QUERY_TIMEOUT' : 'READ_FAILED',
       receipt:error?.reason==='PERMISSION_DENIED' ? '所选事项核对无读取权限，请检查提醒事项权限；未执行或创建事项。'

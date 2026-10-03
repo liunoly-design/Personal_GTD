@@ -20,17 +20,19 @@ func itemValue(_ item: EKReminder) -> [String: Any] {
 }
 func taskValue(_ item: EKReminder) throws -> [String: Any] {
     var baseline = itemValue(item)
-    baseline["completed"] = item.isCompleted
-    baseline["modifiedAt"] = item.lastModifiedDate?.timeIntervalSince1970 as Any? ?? NSNull()
     baseline["due"] = item.dueDateComponents?.description ?? ""
     baseline["priority"] = item.priority
     baseline["alarms"] = item.alarms?.map { $0.absoluteDate?.timeIntervalSince1970.description ?? $0.relativeOffset.description } ?? []
+    let fieldsData = try JSONSerialization.data(withJSONObject: baseline, options: [.sortedKeys])
+    let fieldsRevision = SHA256.hash(data: fieldsData).map { String(format: "%02x", $0) }.joined()
+    baseline["completed"] = item.isCompleted
+    baseline["modifiedAt"] = item.lastModifiedDate?.timeIntervalSince1970 as Any? ?? NSNull()
     let data = try JSONSerialization.data(withJSONObject: baseline, options: [.sortedKeys])
     let revision = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     return ["id": item.calendarItemIdentifier, "listId": item.calendar.calendarIdentifier,
             "sourceId": item.calendar.source.sourceIdentifier,
             "title": String((item.title ?? "").prefix(200)) + ((item.title ?? "").count > 200 ? "…（标题省略）" : ""),
-            "completed": item.isCompleted, "revision": revision]
+            "completed": item.isCompleted, "revision": revision, "fieldsRevision": fieldsRevision]
 }
 func calendar(_ input: [String: Any]) throws -> EKCalendar {
     let id = try string(input, "listId")
@@ -75,6 +77,21 @@ func execute(_ input: [String: Any]) async throws -> [String: Any] {
         list.title = "Inbox"; list.source = source
         try store.saveCalendar(list, commit: true)
         return listValue(list)
+    }
+    if command == "completeTask" {
+        let list = try calendar(input)
+        let id = try string(input, "itemId"), expected = try string(input, "expectedRevision"), fields = try string(input, "fieldsRevision")
+        _ = try marker(string(input, "operationId"))
+        guard expected.count == 64, fields.count == 64, expected.allSatisfy({ $0.isHexDigit }), fields.allSatisfy({ $0.isHexDigit }),
+              let item = store.calendarItem(withIdentifier: id) as? EKReminder,
+              item.calendar.source.sourceIdentifier == sourceId, item.calendar.calendarIdentifier == list.calendarIdentifier else { throw BridgeError(code: "ITEM_UNAVAILABLE") }
+        let current = try taskValue(item)
+        guard current["fieldsRevision"] as? String == fields else { throw BridgeError(code: "ITEM_CHANGED") }
+        if item.isCompleted { return current }
+        guard current["revision"] as? String == expected else { throw BridgeError(code: "ITEM_CHANGED") }
+        item.isCompleted = true
+        try store.save(item, commit: true)
+        return try taskValue(item)
     }
     if command == "readTasks" {
         guard let refs = input["items"] as? [[String: Any]], (1...10).contains(refs.count) else { throw BridgeError(code: "INVALID_INPUT") }

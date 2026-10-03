@@ -25,7 +25,7 @@ export function callApple(input, { signal, timeoutMs = 15000, helperPath = binar
       try {
         const response = JSON.parse(output);
         if (!response.ok) {
-          const denied = ['PERMISSION_DENIED', 'SOURCE_UNAVAILABLE', 'LIST_UNAVAILABLE', 'ITEM_UNAVAILABLE', 'PAST_TIME', 'INVALID_INPUT'];
+          const denied = ['PERMISSION_DENIED', 'SOURCE_UNAVAILABLE', 'LIST_UNAVAILABLE', 'ITEM_UNAVAILABLE', 'PAST_TIME', 'INVALID_INPUT', 'ITEM_CHANGED'];
           const reason = denied.includes(response.code) ? response.code : 'APPLE_FAILURE';
           finish(Object.assign(new Error(reason), { code: denied.includes(response.code) ? 'WRITE_REJECTED' : 'RESULT_UNKNOWN', reason }));
         } else finish(null, response.value);
@@ -71,6 +71,15 @@ export function openAppleReminders({ statePath, sourceId, listId, helperPath, br
       if (!boundId) return { state: 'needs_list', candidates: (await bridge({ command: 'lists', sourceId }, options)).lists };
       return bridge({ command: 'queryTasks', sourceId, listId: boundId, limit, offset }, options);
     },
+    async completeTask({id,listId,expectedRevision,fieldsRevision},operationId,options) {
+      const validId=v=>typeof v==='string'&&v.length>0&&v.length<=1024&&!/[\r\n\x00-\x1f]/u.test(v);
+      if(!validId(id)||!validId(listId)||![expectedRevision,fieldsRevision,operationId].every(v=>/^[a-f0-9]{64}$/u.test(v??'')))throw new Error('Invalid completion input');
+      const request={command:'completeTask',sourceId,operationId,itemId:id,listId,expectedRevision,fieldsRevision};
+      const old=store.get('operation:'+operationId);
+      if(old&&JSON.stringify(old)!==JSON.stringify(request))throw new Error('Operation conflict');
+      store.set('operation:'+operationId,request);
+      return bridge(request,options);
+    },
     async readTasks({ items }, options) {
       const safeId = value => typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\r\n\x00-\x1f]/u.test(value);
       if (!Array.isArray(items) || items.length < 1 || items.length > 10
@@ -110,6 +119,10 @@ export function openAppleReminders({ statePath, sourceId, listId, helperPath, br
     async getOperation(operationId, options) {
       const request = store.get('operation:' + operationId);
       if (!request) return { state: 'unknown' };
+      if(request.command==='completeTask') {
+        const row=(await bridge({command:'readTasks',sourceId,items:[{id:request.itemId,listId:request.listId}]},options)).items?.[0];
+        return row?.state==='ok'&&row.value?.id===request.itemId&&row.value.listId===request.listId&&row.value.sourceId===sourceId&&row.value.completed===true&&row.value.fieldsRevision===request.fieldsRevision ? {state:'applied',value:row.value} : {state:'unknown'};
+      }
       if (request.command === 'createList') {
         const lists = (await bridge({ command: 'lists', sourceId }, options)).lists;
         if (lists.length !== 1) return { state: 'unknown' };

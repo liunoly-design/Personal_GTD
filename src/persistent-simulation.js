@@ -21,6 +21,7 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
     return value;
   }
   const revision = item => createHash('sha256').update(JSON.stringify(item)).digest('hex');
+  const fieldsRevision = ({completed,completionDate,...fields}) => revision(fields);
   const service = {
     async getOperation(id) {
       const record = store.get('operation:' + id);
@@ -40,13 +41,21 @@ export function openPersistentSimulation({ path, afterWrite = () => {} }) {
       const items = all.filter(item => item.listId === list.id && !item.completed)
         .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
       return { state: 'ok', list: { ...list, sourceId: 'sim-source' }, total: items.length, hasMore: offset + limit < items.length,
-        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false, revision:revision(item) })) };
+        items: items.slice(offset, offset + limit).map(item => ({ id: item.id, listId: item.listId, title: item.title, completed: false, revision:revision(item), fieldsRevision:fieldsRevision(item) })) };
     },
     async readTasks({items}) {
       return {items:items.map(({id,listId}) => {
         const item=store.get('item:' + id);
-        return !item || item.listId !== listId ? {id,state:'unavailable'} : {id,state:'ok',value:{id,listId,sourceId:'sim-source',title:item.title,completed:Boolean(item.completed),revision:revision(item)}};
+        return !item || item.listId !== listId ? {id,state:'unavailable'} : {id,state:'ok',value:{id,listId,sourceId:'sim-source',title:item.title,completed:Boolean(item.completed),revision:revision(item),fieldsRevision:fieldsRevision(item)}};
       })};
+    },
+    async completeTask(input,operationId) {
+      return write('complete',input,operationId,()=>{
+        const item=store.get('item:'+input.id);
+        if(!item || item.listId!==input.listId)throw Object.assign(new Error('Item unavailable'),{code:'WRITE_REJECTED',reason:'ITEM_UNAVAILABLE'});
+        if(revision(item)!==input.expectedRevision)throw Object.assign(new Error('Item changed'),{code:'WRITE_REJECTED',reason:'ITEM_CHANGED'});
+        const value={...item,completed:true};store.set('item:'+item.id,value);return value;
+      });
     },
     async listLists() { return store.entries('list:').map(([, value]) => value); },
     async listItems() { return store.entries('item:').map(([, value]) => value); },

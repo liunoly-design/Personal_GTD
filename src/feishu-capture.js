@@ -1,3 +1,4 @@
+import { completeTask } from './actions/complete-task.js';
 import { selectionCandidate, taskSelection, selectTasks } from './actions/select-tasks.js';
 import { taskQuery, queryTasks, validateQueryConfig } from './actions/query-tasks.js';
 import { openOkrSession } from './okr-session.js';
@@ -153,7 +154,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return deliverResult(event, { status: 'event_conflict', receipt: '同一消息 ID 的内容不一致，未新增操作。' });
     }
     const cached = store.get('routed-result:' + id);
-    if (cached) return deliverRouted(event, cached.result);
+    if (cached && store.get('completion:'+id)?.state !== 'write_started') return deliverRouted(event, cached.result);
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
       rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
     let result;
@@ -203,7 +204,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       else if (parentReceipt.senderId !== event.senderId || parentReceipt.conversationId !== event.conversationId) result = {
         status:'task_selection_forbidden',receipt:'这条查询回执不属于当前用户或会话，请自行查询后回复对应回执；未执行或创建事项。',
       };
-      else if (!selection) result = {status:'task_selection_invalid',receipt:'请用明确编号选择，例如“选择第1项”。本次仅支持定位，未执行或创建事项。'};
+      else if (!selection) result = {status:'task_selection_invalid',receipt:'请用明确编号，例如“选择第1项”或“第1项完成”。本次未执行或创建事项。'};
+      else if(selection.length===1&&selection[0].action==='complete') result=await completeTask({event,snapshot,selection,reminders,config,store,signal:options().signal});
       else result = await selectTasks({snapshot,selection,reminders,config,signal:options().signal});
       store.set('routed-result:' + id, {event,result});
       return deliverRouted(event,result);
@@ -260,6 +262,12 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     },
     recover() { return enqueue(async () => {
       const results = await capture.recover();
+      for (const [, record] of store.entries('completion:').filter(([,r])=>r.state==='write_started').slice(0,10)) {
+        if(!config.allowedSenderIds.includes(record.event.senderId)||!config.allowedConversationIds.includes(record.event.conversationId))continue;
+        const result=await completeTask({event:record.event,reminders,config,store,signal:options().signal});
+        store.set('routed-result:'+record.event.id,{event:record.event,result});
+        results.push(await deliverRouted(record.event,result));
+      }
       for (const [, cached] of store.entries('routed-result:')) {
         if (cached.result.delivery !== 'sent') results.push(await deliverRouted(cached.event, cached.result));
       }
