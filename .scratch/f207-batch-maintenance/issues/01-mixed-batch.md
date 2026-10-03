@@ -20,3 +20,6 @@ Spec: [需求与验收基线](../../f108-task-query/maintenance-spec.md)
 ## Verification
 
 本轮实现混合批量路径，基准2c1bf67；完整217/217测试、语法、Swift类型检查及合成demo:maintenance通过（5项、完成2项、移动1项、20ms、零重复写入/模型调用）。真实Apple合成写入与飞书闭环待验收，任务暂不关闭。详见[执行规格](../../f207-batch-maintenance/execution-spec.md)与[部署记录](../../../docs/deployment/f207-maintenance-2026-10-03.md)。
+
+
+用户反馈（2026-10-03）：“已经成功”。上一轮指引为查询Inbox→两项完成计划→确认执行，作为查询及批量完成路径的用户成功反馈；混合移动、ID/字段保留及真实部分失败/未知恢复仍待独立验收，State保持in-progress。

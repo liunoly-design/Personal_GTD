@@ -13,3 +13,6 @@ Blocked by: F108/T04、F207/T01代码交付
 用户测试：新消息“小婕 gtd 查询 inbox 任务”；回复新查询回执“第一第二项完成”，应生成计划，再回复计划“确认执行”后逐项执行核验。目标须至少有两项且由用户选择确认。截图旧“已定位”不等于完成。
 
 已部署快照 `/Users/mac/.openclaw/personal-gtd/releases/f108-list-shorthand-20261003`；快照218项及语法检查通过。PGTD loaded/source指向该快照，网关running/RPC ok，飞书running/probe ok。私有host备份位于runtime/feishu/shorthand-backup-20261003；helper、绑定与其他插件不变。真实新语句闭环待用户反馈。
+
+
+用户反馈（2026-10-03）：“已经成功”。上一轮验收指引为新查询→两项完成计划→确认执行，记录这条路径的用户成功反馈；不据此推断跨列表移动或其他真实故障场景已验收。
