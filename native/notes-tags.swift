@@ -4,6 +4,22 @@ import ApplicationServices
 
 struct Failure: Error { let code: String }
 func fail(_ code:String) throws -> Never { throw Failure(code:code) }
+// Shared by the read-only diagnostic and the native tag activation path.
+func tagActivationRange(_ raw:NSString,_ tag:String) throws -> NSRange {
+    let pattern="(?<![\\p{L}\\p{N}_])"+NSRegularExpression.escapedPattern(for:tag)+"(?![\\p{L}\\p{N}_-])"
+    let regex=try NSRegularExpression(pattern:pattern)
+    let matches=regex.matches(in:raw as String,range:NSRange(location:0,length:raw.length))
+    guard !matches.isEmpty else {try fail("TAG_READ_FAILED")}
+    // Prose may mention the same tag before its heading, followed by punctuation.
+    // Activate an existing whitespace delimiter without inserting or changing text.
+    guard let match=matches.first(where:{match in
+        let after=match.range.location+match.range.length
+        guard after<raw.length else {return false}
+        let delimiter=raw.substring(with:NSRange(location:after,length:1))
+        return delimiter == " " || delimiter == "\n"
+    }) else {try fail("TAG_DELIMITER_REQUIRED")}
+    return match.range
+}
 func get(_ e:AXUIElement,_ key:String)->CFTypeRef? {
     var value:CFTypeRef?
     AXUIElementCopyAttributeValue(e,key as CFString,&value)
@@ -131,6 +147,12 @@ func run() throws -> [String:Any] {
     let data=FileHandle.standardInput.readDataToEndOfFile()
     guard let input=try JSONSerialization.jsonObject(with:data) as? [String:Any],
           let expectedRaw=input["rawPlaintext"] as? String,let command=input["command"] as? String else {try fail("INVALID_INPUT")}
+    if command == "checkTagActivation" {
+        guard expectedRaw.utf16.count<=65536 else {try fail("CAPACITY_EXCEEDED")}
+        guard let tag=input["tag"] as? String,tag.utf16.count<=200,tag.range(of:"^#(?:O|KR)[0-9]+$",options:.regularExpression) != nil else {try fail("INVALID_INPUT")}
+        let r=try tagActivationRange(expectedRaw as NSString,tag)
+        return ["ok":true,"value":["location":r.location,"length":r.length]]
+    }
     guard AXIsProcessTrusted() else {try fail("ACCESSIBILITY_DENIED")}
     guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Notes").first else {try fail("EDITOR_UNAVAILABLE")}
     let root=AXUIElementCreateApplication(app.processIdentifier)
@@ -186,12 +208,9 @@ func run() throws -> [String:Any] {
         for tag in tags where !current.1.contains(tag) {
             try front(app)
             let raw=try value(e) as NSString
-            let tokenPattern="(?<![\\p{L}\\p{N}_])"+NSRegularExpression.escapedPattern(for:tag)+"(?![\\p{L}\\p{N}_-])"
-            let r=raw.range(of:tokenPattern,options:.regularExpression)
-            guard r.location != NSNotFound else {try fail("TAG_READ_FAILED")}
+            let r=try tagActivationRange(raw,tag)
             // Replace the existing delimiter with itself so no extra spaces accumulate.
             let after=r.location+r.length
-            guard after<raw.length,raw.substring(with:NSRange(location:after,length:1)) == " " || raw.substring(with:NSRange(location:after,length:1)) == "\n" else {try fail("TAG_DELIMITER_REQUIRED")}
             let delimiter=raw.substring(with:NSRange(location:after,length:1))
             try select(e,NSRange(location:after,length:1))
             key(delimiter == " " ? 49 : 36);Thread.sleep(forTimeInterval:0.08)
