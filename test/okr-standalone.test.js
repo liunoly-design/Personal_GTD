@@ -6,6 +6,24 @@ import { join } from 'node:path';
 import { openFeishuCapture } from '../src/feishu-capture.js';
 
 const scope = { accountId:'default', entryAgentId:'xiaojie', allowedSenderIds:['ou_test'], allowedConversationIds:['oc_test'], enabledModules:['okr'] };
+test('同身份关联OKR的短否定是业务回答，入口否定查询仍拒绝且重复回答不重调模型',async t=>{
+  const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
+  const dir=mkdtempSync(join(tmpdir(),'okr-short-answer-')),f=standaloneFixture(dir);
+  t.after(async()=>{await f.close();rmSync(dir,{recursive:true,force:true});});
+  await f.send('om_open','小婕 okr 讨论');
+  const parent=f.sent.at(-1).message_id;
+  const result=await f.send('om_no','不需要',{parent});
+  assert.equal(result.status,'okr_guided');assert.equal(f.guideCalls,1);
+  assert.ok(f.notes.some(x=>x.plaintext.includes('不需要')));
+  assert.equal((await f.send('om_no','不需要',{parent})).status,'okr_guided');
+  assert.equal(f.guideCalls,1);
+  const writes=f.operations.filter(x=>['create','append','replace'].includes(x.command)).length;
+  assert.equal((await f.send('om_unlinked','不需要')).status,'not_handled');
+  assert.equal((await f.send('om_negated','小婕 okr 不要查询当前目标')).status,'okr_help');
+  assert.equal((await f.send('om_link_negated','不要查询当前目标',{parent})).status,'okr_help');
+  assert.equal(f.guideCalls,1);
+  assert.equal(f.operations.filter(x=>['create','append','replace'].includes(x.command)).length,writes);
+});
 test('只配置OKR可启动，不建立GTD日志，禁用GTD请求明确拒绝', async t => {
   const dir=mkdtempSync(join(tmpdir(),'okr-only-'));
   let capture;

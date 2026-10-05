@@ -186,7 +186,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     } else if (isOkr) {
       const instruction = explicitOkr ? (entry.module === 'okr' ? command : legacyInstruction) : '';
       const parsed = okrInstruction(linkedOkr ? event.text.trim() : instruction);
-      const blockedReply = linkedOkr && parsed.action !== 'query' && gtdGuard(event.text);
+      const shortAnswer = /^(?:不需要|不用|不想|没有|不是|否)[。！!]?$/u.test(event.text.trim());
+      const blockedReply = linkedOkr && parsed.action !== 'query' && !shortAnswer && gtdGuard(event.text);
       const action = parsed.action === 'query' ? 'query' : blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
         : /^(暂停|先停一下)$/u.test(event.text.trim()) ? 'pause' : 'record' : parsed.action;
       const text = action !== 'record' ? '' : linkedOkr ? event.text : parsed.text;
