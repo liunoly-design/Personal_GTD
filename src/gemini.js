@@ -71,7 +71,7 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
       latencyMs:null, failureReason:'interrupted_or_in_progress' };
     store.transaction(() => {
       const current=usage();
-      if (current.calls >= config.maxCalls || current.budgetUsedUsd + reservation > config.maxBudgetUsd || store.get('halt')) throw new Error('Model budget exhausted');
+      if (current.calls >= config.maxCalls || current.budgetUsedUsd + reservation > config.maxBudgetUsd || store.get('halt')) throw new Error(isOkr ? 'MODEL_BUDGET_EXHAUSTED' : 'Model budget exhausted');
       store.set(id,record);
     });
     let reason = 'network_or_timeout';
@@ -116,8 +116,17 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
       record={...record,state:'done',latencyMs:performance.now()-started,failureReason:null};store.set(id,record);
       return { ...(isOkr ? guidance : {intent:value.intent,title:value.title,suggestion:value.suggestion,reminder:value.reminder}),
         telemetry:{mode:'model',provider:'google',model:payload.modelVersion,inputTokens:record.inputTokens,outputTokens,estimatedCostUsd:record.estimatedCostUsd}};
-    } catch {
-      store.set(id,{...record,state:'failed',latencyMs:performance.now()-started,failureReason:reason});
+    } catch (error) {
+      let failureCode;
+      if (isOkr) {
+        const known = ['INVALID_GUIDANCE','MULTIPLE_OKR_ITEMS','INCOMPLETE_OBJECTIVE'];
+        const codes = { invalid_output:'MODEL_OUTPUT_INVALID', incomplete_output:'MODEL_RESPONSE_INCOMPLETE',
+          network_or_timeout:'MODEL_TRANSPORT_FAILED', usage_unknown:'MODEL_USAGE_UNKNOWN', response_too_large:'MODEL_RESPONSE_TOO_LARGE',
+          http_429:'MODEL_RATE_LIMITED', http_401:'MODEL_AUTH_FAILED', http_403:'MODEL_AUTH_FAILED' };
+        failureCode = reason === 'invalid_output' && known.includes(error?.message) ? error.message : codes[reason] ?? 'MODEL_UNAVAILABLE';
+      }
+      store.set(id,{...record,state:'failed',latencyMs:performance.now()-started,failureReason:reason,...(failureCode ? {failureCode} : {})});
+      if (failureCode) throw new Error(failureCode);
       throw new Error('Model analysis unavailable');
     }
   }

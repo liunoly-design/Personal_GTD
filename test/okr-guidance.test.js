@@ -6,6 +6,14 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openGeminiAnalyzer } from '../src/gemini.js';
+test('模型输出校验失败传播安全原因，账本不记录私人返回正文',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'okr-output-error-'));
+  const model=openGeminiAnalyzer({statePath:join(dir,'usage.sqlite'),apiKey:async()=>'synthetic',config:{maxBudgetUsd:1},fetchImpl:async()=>new Response(JSON.stringify({modelVersion:'gemini-3.8-flash',usageMetadata:{promptTokenCount:10,candidatesTokenCount:10},candidates:[{finishReason:'STOP',content:{parts:[{text:'synthetic-private-invalid-json'}]}}]}))});
+  t.after(async()=>{await model.close();rmSync(dir,{recursive:true,force:true});});
+  await assert.rejects(model.discussOkr({stage:'background',answer:'合成回答'}),/MODEL_OUTPUT_INVALID/);
+  assert.equal(model.usage().records[0].failureReason,'invalid_output');
+  assert.doesNotMatch(JSON.stringify(model.usage()),/synthetic-private-invalid-json/);
+});
 
 test('OKR 模型单轮返回结构化建议，共用预算账本且没有工具权限', async t => {
   const dir=mkdtempSync(join(tmpdir(),'pgtd-okr-model-'));

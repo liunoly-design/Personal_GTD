@@ -6,6 +6,26 @@ import { join } from 'node:path';
 import { openFeishuCapture } from '../src/feishu-capture.js';
 
 const scope = { accountId:'default', entryAgentId:'xiaojie', allowedSenderIds:['ou_test'], allowedConversationIds:['oc_test'], enabledModules:['okr'] };
+test('失败回执说明超时和保存状态，关联重试复用原回答且重投重启不重调',async t=>{
+  const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
+  const dir=mkdtempSync(join(tmpdir(),'okr-retry-'));let seen=[];
+  const f=standaloneFixture(dir,{guide:async input=>{seen.push(input.answer);if(seen.length===1)throw new Error('MODEL_TIMEOUT');return {stage:'direction',summary:'合成背景已收到',advice:'先讨论一个目标',questions:['合成目标的意义是什么？'],draft:null};}});
+  t.after(async()=>{await f.close();rmSync(dir,{recursive:true,force:true});});
+  await f.send('om_open','小婕 okr 讨论');
+  const original='合成回答：作为独立目标讨论';
+  const failure=await f.send('om_fail',original,{parent:f.sent.at(-1).message_id});
+  assert.equal(failure.status,'okr_guidance_failed');assert.match(failure.receipt,/超时/);
+  assert.match(failure.receipt,/草案.*未更新|未更新.*草案/);assert.match(failure.receipt,/重试分析/);
+  assert.ok(f.notes.some(n=>n.plaintext.includes(original)));
+  const failedParent=f.sent.at(-1).message_id;
+  await f.restart();
+  const retried=await f.send('om_retry','重试分析',{parent:failedParent});
+  assert.equal(retried.status,'okr_guided');assert.deepEqual(seen,[original,original]);
+  await f.restart();assert.equal((await f.send('om_retry','重试分析',{parent:failedParent})).status,'okr_guided');assert.equal(seen.length,2);
+  assert.equal((await f.send('om_invalid_retry','重试分析',{parent:f.sent.at(-1).message_id})).status,'okr_retry_unavailable');
+  assert.equal((await f.send('om_bare_retry','小婕 okr 重试分析')).status,'okr_retry_unavailable');
+  assert.equal(seen.length,2);
+});
 test('同身份关联OKR的短否定是业务回答，入口否定查询仍拒绝且重复回答不重调模型',async t=>{
   const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
   const dir=mkdtempSync(join(tmpdir(),'okr-short-answer-')),f=standaloneFixture(dir);

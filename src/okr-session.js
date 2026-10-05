@@ -2,7 +2,7 @@ import { queryCurrentOkr } from './okr-query.js';
 import { openOkrJournal } from './okr-journal.js';
 import { validateOkrStep } from './okr-structure.js';
 import { publishOkr } from './okr-publish.js';
-import { validateGuidance, guidanceText, stages } from './okr-guidance.js';
+import { validateGuidance, guidanceText, guidanceFailureReceipt, stages } from './okr-guidance.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { openOperationStore } from './operation-store.js';
 
@@ -57,6 +57,18 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     if (event.action === 'pause') store.set(sessionKey, false);
     if (event.action === 'pause' || (['record', 'confirm'].includes(event.action) && !store.get(sessionKey))) {
       return finish({ status: 'okr_paused', receipt: 'OKR 记录已暂停。发送“小婕 gtd okr 讨论”后继续。' });
+    }
+    if (event.retryOf) {
+      const source = event.retryOf;
+      const original = store.get('event:' + hash([event.senderId, event.conversationId, source.id]));
+      const parentResult = typeof event.retryParentId === 'string' && event.retryParentId.length <= 256
+        ? store.get('event:' + hash([event.senderId, event.conversationId, event.retryParentId]))?.result : null;
+      if (event.action !== 'record' || source.action !== 'record' || source.senderId !== event.senderId
+        || source.conversationId !== event.conversationId || typeof source.text !== 'string' || !source.text.trim()
+        || source.text.length > 4000 || original?.fingerprint !== hash(source) || original?.result?.status !== 'okr_guidance_failed'
+        || parentResult?.status !== 'okr_guidance_failed') {
+        return finish({ status:'okr_retry_unavailable', receipt:'未找到这条关联回执对应的已保存失败回答，未调用模型。请回复原“分析未完成”回执发送“重试分析”；不要回复已成功的讨论回执。' });
+      }
     }
     let calls = 0;
     const call = async request => {
@@ -157,7 +169,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
           let timer;
           try {
             const value = await Promise.race([
-              Promise.resolve().then(() => guide({ stage: current.stage, workingDraft: current.workingDraft ?? null, answer: event.text,
+              Promise.resolve().then(() => guide({ stage: current.stage, workingDraft: current.workingDraft ?? null, answer: event.retryOf?.text ?? event.text,
                 discussionSummary: current.summary ?? null, lastQuestion: current.lastQuestion ?? null, sentAt: event.sentAt,
                 currentGoals: latest?.plaintext.slice(0, 8000) ?? '', goalsTruncated: (latest?.plaintext.length ?? 0) > 8000,
                 recentLog: recent.text, logTruncated: recent.truncated,
@@ -181,10 +193,9 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
           if (analysis.stage === 'ready') draft = { version: randomUUID(), text: analysis.draft, owner: sessionKey, latestBody: latest?.body ?? null };
         }
       }
-      const failureText = guidanceFailure === 'MULTIPLE_OKR_ITEMS'
-        ? '已保存原回答。模型本轮试图同时改动多项目标或关键结果，未更新草案或推进讨论。你可以一次提供多个想法；我们接下来只讨论一项。请回复新消息，明确“先只讨论当前目标的某一个 KR”，并说明你希望先完善哪一项。'
-        : '已保存原回答，本轮分析未完成。可稍后用新消息继续；同一消息不会重复调用模型。';
-      const entryText = guide ? event.text + '\n' + (analysis ? guidanceText(analysis) : failureText) : event.text;
+      const failureText = guidanceFailureReceipt(guidanceFailure);
+      const rawAnswer = event.retryOf ? event.text + '\n重试原回答：\n' + event.retryOf.text : event.text;
+      const entryText = guide ? rawAnswer + '\n' + (analysis ? guidanceText(analysis) : failureText) : rawAnswer;
       const result = { status: guide ? analysis ? 'okr_guided' : 'okr_guidance_failed' : 'okr_saved', noteId: note.id, receipt: journal ? '已保存到本地 OKR Markdown 日志，并更新当前讨论稿。回复此消息可继续。' : '已保存到 OKR 日志。回复此消息可继续记录；启动 OKR 讨论可回看。' };
       if (guidanceFailure) result.guidanceFailure = guidanceFailure;
       if (guide) result.receipt = analysis ? '已记录。\n' + guidanceText(analysis) : failureText;

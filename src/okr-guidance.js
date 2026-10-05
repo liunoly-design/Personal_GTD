@@ -2,6 +2,29 @@ import { readFileSync } from 'node:fs';
 import { parseOkrDraft } from './okr-structure.js';
 const method = readFileSync(new URL('./okr-method.md', import.meta.url), 'utf8');
 export const stages = ['background', 'direction', 'okr', 'challenge', 'ready'];
+export function guidanceFailureReceipt(reason) {
+  const explanations = {
+    MODEL_TIMEOUT:'本轮模型分析超时，已停止等待。',
+    MODEL_OUTPUT_INVALID:'模型返回未通过输出格式校验。',
+    MODEL_RESPONSE_INCOMPLETE:'模型返回不完整。',
+    MODEL_TRANSPORT_FAILED:'模型服务连接失败或请求超时。',
+    MODEL_RATE_LIMITED:'模型服务限流，请稍后再试。',
+    MODEL_AUTH_FAILED:'模型服务鉴权失败，需要维护者检查凭据。',
+    MODEL_USAGE_UNKNOWN:'模型用量无法核实，已停止新增调用，需要维护者核对账本。',
+    MODEL_BUDGET_EXHAUSTED:'模型调用预算已停止，不会继续产生新调用。',
+    MODEL_RESPONSE_TOO_LARGE:'模型返回超过本版容量。',
+    INVALID_GUIDANCE:'模型建议未通过问题数量、阶段或草案结构校验。',
+    INVALID_TRANSITION:'模型试图跳过规定讨论阶段。',
+    INCOMPLETE_OBJECTIVE:'现有目标不足三个KR，不能直接增加下一个目标。',
+    MULTIPLE_OKR_ITEMS:'模型本轮试图同时改动多项目标或关键结果；本轮只允许讨论一项。',
+    INCOMPLETE_CONTEXT:'当前目标内容超过上下文上限，不能直接定稿。',
+    MODEL_INTERRUPTED:'上轮分析中断，结果未确认。',
+  };
+  const recovery = ['MODEL_AUTH_FAILED','MODEL_USAGE_UNKNOWN','MODEL_BUDGET_EXHAUSTED','INCOMPLETE_CONTEXT'].includes(reason)
+    ? '请保留本回执，交由维护者处理上述原因后再恢复。'
+    : '恢复：请回复本回执发送“重试分析”，系统会复用已保存的原回答，按当前草案只处理一项；这是一次新的分析，仍计入原预算。';
+  return `已保存原回答；未更新草案和当前已确认目标。\n原因：${explanations[reason] ?? '本轮模型分析失败，尚无可核实的更具体原因。'}\n${recovery}\n同一消息重复投递不会重跑模型；“续接”只展示已有进度。`;
+}
 export const okrInstructions = `你是小婕的个人 OKR+GTD 讨论教练。
 ${method}
 

@@ -147,6 +147,15 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const linkedOkr = !prefix && parent?.route === 'okr' && parent.senderId === event.senderId
       && parent.conversationId === event.conversationId;
     const isOkr = explicitOkr || linkedOkr;
+    const retryRequested = isOkr && (linkedOkr ? event.text.trim() : command) === '重试分析';
+    if (retryRequested && parentReceipt?.event) {
+      const source = parentReceipt.event;
+      event.retryParentId = source.id;
+      const sourceEntry = explicitEntry(source.text, config.activation);
+      const sourceInstruction = sourceEntry?.module === 'okr' ? sourceEntry.instruction : legacyOkrInstruction(sourceEntry);
+      event.retryOf = source.retryOf ?? { ...source, action:'record',
+        text: sourceInstruction == null ? source.text : okrInstruction(sourceInstruction).text ?? '' };
+    }
     if (message.updated) {
       // A provider update flag does not prove that the delivered text changed.
       // Only conversational OKR replies may proceed after exact content checks.
@@ -191,7 +200,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       const action = parsed.action === 'query' ? 'query' : blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
         : /^(暂停|先停一下)$/u.test(event.text.trim()) ? 'pause' : 'record' : parsed.action;
       const text = action !== 'record' ? '' : linkedOkr ? event.text : parsed.text;
-      if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
+      if (retryRequested && !event.retryOf) result = { status:'okr_retry_unavailable', receipt:'请回复原“分析未完成”回执发送“重试分析”，以定位已保存的回答；未调用模型。' };
+      else if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
       else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 okr 讨论/续接”，回复关联消息记录文字，或使用“小婕 okr 记录：内容”“小婕 okr 暂停”。查询当前目标可用“小婕 okr 查询当前目标”；规划和调整尚未实现；定稿须回复当前草案“确认定稿”。' };
       else {
         const confirmVersion = parentReceipt?.route === 'okr' && parentReceipt.senderId === event.senderId
