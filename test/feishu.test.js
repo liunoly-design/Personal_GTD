@@ -456,10 +456,11 @@ test('三个命名空间边界、空入口和 OKR 否定/查询均不新增业�
     '“小婕 gtd 买牛奶”', '> 小婕 review 日复盘'].entries()) {
     assert.equal((await dispatch(f, 'om_boundary' + i, text)).status, 'not_handled');
   }
-  for (const [i, text] of ['小婕 okr', '小婕 OKR：未知动作', '小婕 okr 看看当前目标', '小婕 okr 不要记录这句话',
+  for (const [i, text] of ['小婕 okr', '小婕 OKR：未知动作', '小婕 okr 不要记录这句话',
     '小婕 okr “记录：引用”', '小婕 okr 讨论并删除任务', '小婕 okr 好的'].entries()) {
     assert.equal((await dispatch(f, 'om_help' + i, text)).status, 'okr_help');
   }
+  assert.equal((await dispatch(f, 'om_query_unbound', '小婕 okr 看看当前目标')).status, 'okr_query_needs_binding');
   assert.equal((await dispatch(f, 'om_empty', '小婕GTD')).status, 'needs_instruction');
   assert.equal(n.calls, 0);
   assert.equal(f.calls, 0);
@@ -467,7 +468,7 @@ test('三个命名空间边界、空入口和 OKR 否定/查询均不新增业�
   await dispatch(f, 'om_start_guard', '小婕 okr 讨论');
   const parent = f.sent.at(-1).message_id;
   const before = n.calls;
-  assert.equal((await dispatch(f, 'om_link_query', '查询当前目标', parent)).status, 'okr_help');
+  assert.equal((await dispatch(f, 'om_link_query', '查询当前目标', parent)).status, 'okr_query_needs_binding');
   assert.equal((await dispatch(f, 'om_link_neg', '不要记录这句话', parent)).status, 'okr_help');
   assert.equal(n.calls, before);
 });

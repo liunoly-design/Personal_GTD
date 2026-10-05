@@ -1,3 +1,4 @@
+import { queryCurrentOkr } from './okr-query.js';
 import { openOkrJournal } from './okr-journal.js';
 import { validateOkrStep } from './okr-structure.js';
 import { publishOkr } from './okr-publish.js';
@@ -37,7 +38,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
   } catch (error) { store.close(); throw error; }
   let queue = Promise.resolve(), closed = false;
   async function handle(event) {
-    if (!['open', 'record', 'pause', 'confirm'].includes(event.action)
+    if (!['open', 'record', 'pause', 'confirm', 'query'].includes(event.action)
       || ![event.id, event.senderId, event.conversationId].every(v => typeof v === 'string' && v.trim() && v.length <= 256)
       || typeof event.sentAt !== 'string' || !Number.isFinite(Date.parse(event.sentAt))
       || typeof event.text !== 'string' || event.text.length > 4000
@@ -50,6 +51,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
     if (!previous && store.entries('event:').length >= 1000) throw new Error('BUDGET_EXHAUSTED');
     const finish = result => { store.set(key, { fingerprint, result }); return result; };
     store.set(key, { fingerprint });
+    if (event.action === 'query') return finish(await queryCurrentOkr({ latest: store.get('latest'), binding: store.get('note'), location: config, pending: store.get('publication'), bridge, page: event.page }));
     if (store.get('publication') && store.get('publication').key !== key) throw new Error('RECOVERY_REQUIRED');
     const sessionKey = 'session:' + hash([event.senderId, event.conversationId]);
     if (event.action === 'pause') store.set(sessionKey, false);

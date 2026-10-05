@@ -74,7 +74,7 @@ export async function publishOkr({ store, call, binding, logNote, key, fingerpri
     store.set('local-note-body', cleared.body);
   }
   op.result = { status: 'okr_finalized', noteId: latest.id, receipt: journal ? '已更新 OKR 最新完整稿；完整问答、讨论稿和旧版本已归档到本地 Markdown，备忘录讨论稿已收起。' : '已更新 OKR 最新完整稿，确认内容和旧版已保留在 OKR 日志中。' };
-  store.set('latest', { id: latest.id });
+  store.set('latest', { id: latest.id, marker: op.marker });
   save('done');
   return op.result;
 }

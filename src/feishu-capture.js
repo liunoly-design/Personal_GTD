@@ -185,18 +185,18 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       result = { status: 'review_unavailable', receipt: 'Review 功能尚未实现/启用。日/周/专题复盘及注册均待后续交付，本次未读取或写入业务记录。' };
     } else if (isOkr) {
       const instruction = explicitOkr ? (entry.module === 'okr' ? command : legacyInstruction) : '';
-      const parsed = okrInstruction(instruction);
-      const blockedReply = linkedOkr && gtdGuard(event.text);
-      const action = blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
+      const parsed = okrInstruction(linkedOkr ? event.text.trim() : instruction);
+      const blockedReply = linkedOkr && parsed.action !== 'query' && gtdGuard(event.text);
+      const action = parsed.action === 'query' ? 'query' : blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
         : /^(暂停|先停一下)$/u.test(event.text.trim()) ? 'pause' : 'record' : parsed.action;
       const text = action !== 'record' ? '' : linkedOkr ? event.text : parsed.text;
       if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
-      else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 okr 讨论/续接”，回复关联消息记录文字，或使用“小婕 okr 记录：内容”“小婕 okr 暂停”。查询、规划和调整尚未实现；定稿须回复当前草案“确认定稿”。' };
+      else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 okr 讨论/续接”，回复关联消息记录文字，或使用“小婕 okr 记录：内容”“小婕 okr 暂停”。查询当前目标可用“小婕 okr 查询当前目标”；规划和调整尚未实现；定稿须回复当前草案“确认定稿”。' };
       else {
         const confirmVersion = parentReceipt?.route === 'okr' && parentReceipt.senderId === event.senderId
           && parentReceipt.conversationId === event.conversationId ? parentReceipt.draftVersion : undefined;
         try {
-          result = await okr.handle({ ...event, action, text, ...(action === 'confirm' ? { confirmVersion } : {}) });
+          result = await okr.handle({ ...event, action, text, ...(action === 'query' ? { page: parsed.page } : {}), ...(action === 'confirm' ? { confirmVersion } : {}) });
         }
         catch (error) {
           const code = ['INVALID_INPUT', 'CONFLICT', 'CAPACITY_EXCEEDED', 'BUDGET_EXHAUSTED', 'CREATE_RESULT_UNKNOWN',
@@ -243,7 +243,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return deliverRouted(event, result);
     } else result = await capture.handle(event);
     if (result.draftVersion) store.set('source:' + id, { ...store.get('source:' + id), draftVersion: result.draftVersion });
-    if (['review_unavailable', 'okr_unavailable', 'okr_help'].includes(result.status)) {
+    if ((['review_unavailable', 'okr_unavailable', 'okr_help'].includes(result.status) || result.status.startsWith('okr_query'))) {
       store.set('routed-result:' + id, { event, result });
       return deliverRouted(event, result);
     }

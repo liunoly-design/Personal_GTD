@@ -5,7 +5,8 @@ Related features: F603
 Version: 0.3.0
 Legacy index: P02
 Status: ready-for-agent
-State: done (开发与合成验收；真实增量验收待完成)
+State: done
+Real acceptance: pending（真实增量验收待完成）
 Blocked by: 无新增阻塞；F601/T01、F103/F104 已有实现
 Spec: [批次交付约定](../spec.md)；领取时冻结本任务单项规格。
 

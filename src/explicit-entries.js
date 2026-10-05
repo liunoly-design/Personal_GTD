@@ -1,3 +1,4 @@
+import { okrQueryInstruction } from './okr-query.js';
 import { activationLength } from './activation.js';
 
 // Parsing is separate from the trusted event; never rewrite its text or ID.
@@ -11,6 +12,8 @@ export function explicitEntry(text, activation) {
 }
 
 export function okrInstruction(instruction) {
+  const query = okrQueryInstruction(instruction);
+  if (query) return query;
   if (gtdGuard(instruction)) return {};
   if (instruction === '确认定稿') return { action: 'confirm', text: '' };
   if (/^(暂停|先停一下)$/u.test(instruction)) return { action: 'pause', text: '' };
