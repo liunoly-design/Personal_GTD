@@ -10,8 +10,15 @@ import { openOperationStore } from './operation-store.js';
 import { openDurableCapture } from './durable-capture.js';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function enabledModules(config) {
+  const modules = config.enabledModules ?? ['gtd', 'okr'];
+  if (!Array.isArray(modules) || !modules.length || new Set(modules).size !== modules.length
+    || modules.some(name => !['gtd', 'okr'].includes(name))) throw new Error('Invalid enabledModules');
+  return modules;
+}
 export function validateFeishuScope(config) {
   validateEntryActivation(config.activation);
+  enabledModules(config);
   validateQueryConfig(config);
   for (const name of ['accountId', 'entryAgentId']) {
     if (typeof config[name] !== 'string' || !config[name].trim()) throw new Error('Explicit scope required');
@@ -43,6 +50,7 @@ export function acceptsFeishuContext(ctx, config) {
 export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now, notesBridge, okrGuide }) {
   config = structuredClone(config);
   validateFeishuScope(config);
+  const modules = enabledModules(config);
   const maxEvents = config.maxStoredEvents ?? 1000;
   if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > 1000) throw new Error('Event limit must be 1..1000');
   let queue = Promise.resolve(), queued = 0, closed = false, activeSignal;
@@ -90,14 +98,14 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       getOperation: (id, { signal } = {}) => reminders.getOperation(id, options(signal)),
     };
     const scopedAnalyze = args => analyze({ ...args, ...options(args.signal) });
-    scopedAnalyze.mode = analyze.mode;
-    if (config.okr) {
+    scopedAnalyze.mode = analyze?.mode;
+    if (modules.includes('okr') && config.okr) {
       if (typeof notesBridge !== 'function') throw new Error('Notes bridge required');
       okr = openOkrSession({ statePath: join(stateDir, 'okr.sqlite'), config: config.okr,
         bridge: request => { options(); return notesBridge(request); },
         guide: okrGuide ? args => okrGuide({ ...args, ...options(args.signal) }) : undefined });
     }
-    capture = openDurableCapture({ journalPath: join(stateDir, 'capture.sqlite'), reminders: scopedReminders, receipts, analyze: scopedAnalyze,
+    if (modules.includes('gtd')) capture = openDurableCapture({ journalPath: join(stateDir, 'capture.sqlite'), reminders: scopedReminders, receipts, analyze: scopedAnalyze,
       config: { ...config, externalTimeoutMs: 20000 }, now });
     store.set('account', config.accountId);
   } catch (error) { void okr?.close(); store.close(); throw error; }
@@ -162,7 +170,11 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
       rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
     let result;
-    if ((entry?.module==='gtd'||!entry) && ((parentReceipt?.planId && (!entry||maintenanceControl(command)))
+    if (!modules.includes(isOkr ? 'okr' : 'gtd') && entry?.module !== 'review') {
+      result = { status: 'module_disabled', receipt: '该模块未启用，请使用已配置的模块入口。' };
+      store.set('routed-result:' + id, { event, result });
+      return deliverRouted(event, result);
+    } else if ((entry?.module==='gtd'||!entry) && ((parentReceipt?.planId && (!entry||maintenanceControl(command)))
       || (maintenanceControl(command||event.text)&&querySnapshot))) {
       const control=maintenanceControl(command||event.text),planId=parentReceipt?.planId;
       result=planId&&!control?{status:'task_plan_help',planId,receipt:'请回复此计划“确认执行”或“取消”。如需修改操作，请回复原任务查询回执重新提出；本次未修改事项。'}
@@ -176,7 +188,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       const parsed = okrInstruction(instruction);
       const blockedReply = linkedOkr && gtdGuard(event.text);
       const action = blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
-        : 'record' : parsed.action;
+        : /^(暂停|先停一下)$/u.test(event.text.trim()) ? 'pause' : 'record' : parsed.action;
       const text = action !== 'record' ? '' : linkedOkr ? event.text : parsed.text;
       if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
       else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 okr 讨论/续接”，回复关联消息记录文字，或使用“小婕 okr 记录：内容”“小婕 okr 暂停”。查询、规划和调整尚未实现；定稿须回复当前草案“确认定稿”。' };
@@ -277,14 +289,14 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return enqueue(() => handle(input), signal);
     },
     recover() { return enqueue(async () => {
-      const results = await capture.recover();
-      for(const [,plan]of store.entries('maintenance:').filter(([,p])=>p.state==='running').slice(0,1)) {
+      const results = capture ? await capture.recover() : [];
+      for(const [,plan]of (modules.includes('gtd') ? store.entries('maintenance:') : []).filter(([,p])=>p.state==='running').slice(0,1)) {
         const event=plan.executionEvent;
         if(!config.allowedSenderIds.includes(event.senderId)||!config.allowedConversationIds.includes(event.conversationId))continue;
         const result=await executeTaskPlan({planId:plan.planId,event,control:'confirm',reminders,config,store,signal:options().signal});
         store.set('routed-result:'+event.id,{event,result});results.push(await deliverRouted(event,result));
       }
-      for (const [, record] of store.entries('completion:').filter(([,r])=>r.state==='write_started').slice(0,10)) {
+      for (const [, record] of (modules.includes('gtd') ? store.entries('completion:') : []).filter(([,r])=>r.state==='write_started').slice(0,10)) {
         if(!config.allowedSenderIds.includes(record.event.senderId)||!config.allowedConversationIds.includes(record.event.conversationId))continue;
         const result=await completeTask({event:record.event,reminders,config,store,signal:options().signal});
         store.set('routed-result:'+record.event.id,{event:record.event,result});
@@ -295,6 +307,6 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       }
       return results;
     }); },
-    async close() { if (closed) return; closed = true; await queue; await capture.close(); await okr?.close(); store.close(); },
+    async close() { if (closed) return; closed = true; await queue; await capture?.close(); await okr?.close(); store.close(); },
   };
 }

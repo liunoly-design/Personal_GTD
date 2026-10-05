@@ -5,7 +5,7 @@ import { openAppleReminders } from '../src/apple-reminders.js';
 import { openGeminiAnalyzer } from '../src/gemini.js';
 import { openClawGoogleKey } from '../src/openclaw-auth.js';
 import { createFeishuClient } from '../src/feishu-http.js';
-import { openFeishuCapture } from '../src/feishu-capture.js';
+import { openFeishuCapture, enabledModules } from '../src/feishu-capture.js';
 
 export async function openRuntime({ config, hostConfig, googleKey = openClawGoogleKey }) {
   if (!isAbsolute(config.runtimeConfigPath) || !isAbsolute(config.stateDir)) throw new Error('Absolute private paths required');
@@ -13,7 +13,8 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
   if (!isAbsolute(runtime.usagePath ?? '') || !Number.isFinite(runtime.model?.maxBudgetUsd) || !Number.isSafeInteger(runtime.model?.maxCalls)) {
     throw new Error('Explicit shared budget ledger and limits required');
   }
-  if (!isAbsolute(runtime.remindersHelperPath ?? '')) throw new Error('Absolute Reminders helper path required');
+  const modules = enabledModules({ ...runtime, ...config });
+  if (modules.includes('gtd') && !isAbsolute(runtime.remindersHelperPath ?? '')) throw new Error('Absolute Reminders helper path required');
   const channel = hostConfig.channels?.feishu;
   const account = { ...channel, ...channel?.accounts?.[config.accountId] };
   if (account.domain && account.domain !== 'feishu') throw new Error('Only Feishu domain supported');
@@ -33,11 +34,11 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
     finally { clearTimeout(preparationTimer); }
     model = openGeminiAnalyzer({ statePath: runtime.usagePath, config: runtime.model,
       apiKey });
-    reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, helperPath: runtime.remindersHelperPath, statePath: join(config.stateDir, 'adapter.sqlite') });
+    if (modules.includes('gtd')) reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, helperPath: runtime.remindersHelperPath, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
       reminders, feishu, analyze: model.analyze, notesBridge: callNotes, okrGuide: model.discussOkr });
     return { handle: (ctx, options) => capture.handle(ctx, options), recover: () => capture.recover(), async close() {
-      await capture.close(); reminders.close(); await model.close();
+      await capture.close(); reminders?.close(); await model.close();
     } };
   } catch (error) { await capture?.close(); reminders?.close(); await model?.close(); throw error; }
 }

@@ -385,3 +385,11 @@ F108/T09：指定清单可简写 `小婕 gtd 查询 inbox 任务` 或 `小婕 gt
 发送 `小婕 gtd 查询 waiting 里面关于金山的任务`，只查询指定清单未完成标题包含“金山”的事项；默认绑定清单可用 `小婕 gtd 查询关于金山的任务`。忽略大小写、采用 NFC Unicode 归一化，连续匹配完整关键词，不搜索备注、不拆词、不扩展日期或全部清单。歧义词用引号明确，如 `关于「今天到期」的任务` 表示字面标题关键词。下一页命令保留关键词及清单，数量为筛选后的未完成总数；无结果明确说明。
 
 查询只读、不调用付费模型、不改变默认绑定。回复这条查询回执可沿用编号完成/移动及批量确认。检查用 `npm run test:query`、`npm run demo:query`；[短规格](.scratch/f108-task-query/keyword-spec.md)、[验收记录](docs/deployment/f108-keyword-2026-10-03.md)。日期与备注搜索仍待独立任务。
+
+## F603/T01：OKR 单模块（目标 0.3.0，未发布）
+
+私有 `runtimeConfigPath` JSON 可设置 `"enabledModules": ["okr"]`，保留原 `okr.account`、`okr.folder`、已绑定笔记状态、`okr.journalDir` 和共享 `usagePath/model` 预算。此模式不要求 `sourceId/listId/remindersHelperPath`，不初始化提醒事项或 Review；未设置 `enabledModules` 时保留现有行为。不要删除旧状态来切换模块或恢复写入。
+
+使用 `小婕 okr 讨论`，关联回复逐项讨论；`小婕 okr 暂停` 或回复“暂停”后，`小婕 okr 续接` 恢复。回复当前完整草案“确认定稿”才更新同一最新稿；`小婕 gtd okr …` 兼容。禁用模块明确拒绝。完整日志保存在本地，Notes 保留讨论稿/最新稿两篇，原生标签及未知结果核对机制沿用。
+
+`npm run test:okr-standalone`、`npm run demo:okr-standalone` 使用合成 Notes/飞书/脚本教练，零付费调用。运行配置仍需可信飞书身份、Notes 权限、已有模型预算和桌面环境；开发通过不代表部署或真实模型质量验收。[验收记录](docs/deployment/f603-2026-10-05.md)。
