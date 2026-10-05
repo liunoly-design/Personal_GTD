@@ -5,20 +5,20 @@ import ApplicationServices
 struct Failure: Error { let code: String }
 func fail(_ code:String) throws -> Never { throw Failure(code:code) }
 // Shared by the read-only diagnostic and the native tag activation path.
-func tagActivationRange(_ raw:NSString,_ tag:String) throws -> NSRange {
+func tagActivationRange(_ raw:NSString,_ tag:String) throws -> (range:NSRange,temporaryDelimiter:Bool) {
     let pattern="(?<![\\p{L}\\p{N}_])"+NSRegularExpression.escapedPattern(for:tag)+"(?![\\p{L}\\p{N}_-])"
     let regex=try NSRegularExpression(pattern:pattern)
     let matches=regex.matches(in:raw as String,range:NSRange(location:0,length:raw.length))
     guard !matches.isEmpty else {try fail("TAG_READ_FAILED")}
     // Prose may mention the same tag before its heading, followed by punctuation.
     // Activate an existing whitespace delimiter without inserting or changing text.
-    guard let match=matches.first(where:{match in
+    if let match=matches.first(where:{match in
         let after=match.range.location+match.range.length
         guard after<raw.length else {return false}
         let delimiter=raw.substring(with:NSRange(location:after,length:1))
         return delimiter == " " || delimiter == "\n"
-    }) else {try fail("TAG_DELIMITER_REQUIRED")}
-    return match.range
+    }) {return (match.range,false)}
+    return (matches[0].range,true)
 }
 func get(_ e:AXUIElement,_ key:String)->CFTypeRef? {
     var value:CFTypeRef?
@@ -151,7 +151,7 @@ func run() throws -> [String:Any] {
         guard expectedRaw.utf16.count<=65536 else {try fail("CAPACITY_EXCEEDED")}
         guard let tag=input["tag"] as? String,tag.utf16.count<=200,tag.range(of:"^#(?:O|KR)[0-9]+$",options:.regularExpression) != nil else {try fail("INVALID_INPUT")}
         let r=try tagActivationRange(expectedRaw as NSString,tag)
-        return ["ok":true,"value":["location":r.location,"length":r.length]]
+        return ["ok":true,"value":["location":r.range.location,"length":r.range.length,"temporaryDelimiter":r.temporaryDelimiter]]
     }
     guard AXIsProcessTrusted() else {try fail("ACCESSIBILITY_DENIED")}
     guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Notes").first else {try fail("EDITOR_UNAVAILABLE")}
@@ -210,10 +210,23 @@ func run() throws -> [String:Any] {
             let raw=try value(e) as NSString
             let r=try tagActivationRange(raw,tag)
             // Replace the existing delimiter with itself so no extra spaces accumulate.
-            let after=r.location+r.length
-            let delimiter=raw.substring(with:NSRange(location:after,length:1))
-            try select(e,NSRange(location:after,length:1))
-            key(delimiter == " " ? 49 : 36);Thread.sleep(forTimeInterval:0.08)
+            let after=r.range.location+r.range.length
+            if r.temporaryDelimiter {
+                // Prose-only tags can be followed solely by punctuation. Use a
+                // temporary space, then remove only that verified inserted byte.
+                try select(e,NSRange(location:after,length:0))
+                key(49);Thread.sleep(forTimeInterval:0.08)
+                let originalText=current.0
+                let inserted=raw.replacingCharacters(in:r.range,with:"\u{fffc} ")
+                guard try value(e)==inserted else {try fail("WRITE_RESULT_UNKNOWN")}
+                try select(e,NSRange(location:r.range.location+1,length:1))
+                key(51);Thread.sleep(forTimeInterval:0.08)
+                guard try read(e).0==originalText else {try fail("WRITE_RESULT_UNKNOWN")}
+            } else {
+                let delimiter=raw.substring(with:NSRange(location:after,length:1))
+                try select(e,NSRange(location:after,length:1))
+                key(delimiter == " " ? 49 : 36);Thread.sleep(forTimeInterval:0.08)
+            }
             current=try read(e)
             guard current.1.contains(tag) else {try fail("TAG_WRITE_FAILED")}
         }
