@@ -386,7 +386,7 @@ F108/T09：指定清单可简写 `小婕 gtd 查询 inbox 任务` 或 `小婕 gt
 
 查询只读、不调用付费模型、不改变默认绑定。回复这条查询回执可沿用编号完成/移动及批量确认。检查用 `npm run test:query`、`npm run demo:query`；[短规格](.scratch/f108-task-query/keyword-spec.md)、[验收记录](docs/deployment/f108-keyword-2026-10-03.md)。日期与备注搜索仍待独立任务。
 
-## F603/T01：OKR 单模块（目标 0.3.0，未发布）
+## F603/T01：OKR 单模块（增量已部署，目标 0.3.0）
 
 私有 `runtimeConfigPath` JSON 可设置 `"enabledModules": ["okr"]`，保留原 `okr.account`、`okr.folder`、已绑定笔记状态、`okr.journalDir` 和共享 `usagePath/model` 预算。此模式不要求 `sourceId/listId/remindersHelperPath`，不初始化提醒事项或 Review；未设置 `enabledModules` 时保留现有行为。不要删除旧状态来切换模块或恢复写入。
 
@@ -394,10 +394,10 @@ F108/T09：指定清单可简写 `小婕 gtd 查询 inbox 任务` 或 `小婕 gt
 
 `npm run test:okr-standalone`、`npm run demo:okr-standalone` 使用合成 Notes/飞书/脚本教练，零付费调用。运行配置仍需可信飞书身份、Notes 权限、已有模型预算和桌面环境；开发通过不代表部署或真实模型质量验收。[验收记录](docs/deployment/f603-2026-10-05.md)。
 
-## F603/T02：查询当前已确认目标（未部署）
+## F603/T02：查询当前已确认目标（增量已部署）
 
 `小婕 okr 查询当前目标`、`查一下目标`、`查看当前已确认目标`、`看看目标`、`找一下当前目标`、`列出当前目标`、`当前目标是什么`读取同一绑定最新稿；旧 `小婕 gtd okr …` 和关联回复兼容。回执显示来源、账户/文件夹、笔记ID、读取时间与当前已确认范围。查询不启动讨论、不生成草案、不写 Notes、不进入 Inbox、零内容生成模型调用。无绑定先询问；同名文档不自动选择；空文档、读取失败、无权限及未确认稿分别报告。
 
 每次最多一次60秒读取，正文超过65536字符拒绝，每页2000字符；继续用 `小婕 okr 查询当前目标 第2页`。各页实时读取，期间人工修改可能改变分页；重复同一事件复用旧回执，更新事实请用新消息重新查询。正在核对定稿结果时先恢复原确认消息。
 
-`npm run test:okr-query`、`npm run demo:okr-query` 为合成验收。真实只读入口：`npm run verify:okr-query -- --state-path runtime/feishu/state/okr.sqlite`，只使用已授权绑定，状态数据库只读，不初始化会话、不展示私人正文、不发送飞书。现有模型/身份预算和 Notes 桥接限制沿用。飞书查询仍需后续授权部署与用户真实消息验收。
+`npm run test:okr-query`、`npm run demo:okr-query` 为合成验收。真实只读入口：`npm run verify:okr-query -- --state-path runtime/feishu/state/okr.sqlite`，只使用已授权绑定，状态数据库只读，不初始化会话、不展示私人正文、不发送飞书。现有模型/身份预算和 Notes 桥接限制沿用。2026-10-05已部署增量并通过发布快照真实Notes只读复验；真实飞书查询仍需用户新消息验收。完整0.3.0版本未发布。

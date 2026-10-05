@@ -6,7 +6,7 @@ Version: 0.3.0
 Legacy index: P03
 Status: ready-for-agent
 State: done
-Real acceptance: Notes只读通过；真实飞书增量待部署后验收
+Real acceptance: Notes只读通过；增量已部署，真实飞书用户新消息待验收
 Blocked by: 无新增阻塞；已有 F104/Notes 读取能力
 Spec: [批次交付约定](../spec.md)；领取时冻结本任务单项规格。
 
@@ -34,3 +34,5 @@ Spec: [批次交付约定](../spec.md)；领取时冻结本任务单项规格。
 
 
 2026-10-05：单项SPEC见 [T02](../../f603-okr/t02-spec.md)，合成与真实只读证据见 [验收记录](../../../docs/deployment/f603-2026-10-05.md)。未部署/发布、未扩大外部授权。
+
+2026-10-05后续：用户授权部署；新发布快照236项测试和真实Notes查询复验通过，网关/飞书已重载连接。真实用户新查询与多轮定稿仍待验收，见同一部署记录。
