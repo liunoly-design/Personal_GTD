@@ -400,4 +400,4 @@ F108/T09：指定清单可简写 `小婕 gtd 查询 inbox 任务` 或 `小婕 gt
 
 每次最多一次60秒读取，正文超过65536字符拒绝，每页2000字符；继续用 `小婕 okr 查询当前目标 第2页`。各页实时读取，期间人工修改可能改变分页；重复同一事件复用旧回执，更新事实请用新消息重新查询。正在核对定稿结果时先恢复原确认消息。
 
-`npm run test:okr-query`、`npm run demo:okr-query` 为合成验收。真实只读入口：`npm run verify:okr-query -- --state-path runtime/feishu/state/okr.sqlite`，只使用已授权绑定，状态数据库只读，不初始化会话、不展示私人正文、不发送飞书。现有模型/身份预算和 Notes 桥接限制沿用。2026-10-05已部署增量并通过发布快照真实Notes只读复验；真实飞书查询仍需用户新消息验收。完整0.3.0版本未发布。
+`npm run test:okr-query`、`npm run demo:okr-query` 为合成验收。真实只读入口：`npm run verify:okr-query -- --state-path runtime/feishu/state/okr.sqlite`，只使用已授权绑定，状态数据库只读，不初始化会话、不展示私人正文、不发送飞书。现有模型/身份预算和 Notes 桥接限制沿用。2026-10-05已部署增量，真实Notes查询、飞书基本/同义/旧入口查询和暂停重启续接通过；真实多轮模型讨论及定稿仍待验收。完整0.3.0版本未发布。
