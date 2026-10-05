@@ -6,6 +6,20 @@ import { join } from 'node:path';
 import { openFeishuCapture } from '../src/feishu-capture.js';
 
 const scope = { accountId:'default', entryAgentId:'xiaojie', allowedSenderIds:['ou_test'], allowedConversationIds:['oc_test'], enabledModules:['okr'] };
+test('编辑窗口不可用说明原因和恢复，重置分析仅纠正命令而不读写或调用模型',async t=>{
+  const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
+  const dir=mkdtempSync(join(tmpdir(),'okr-editor-error-'));let unavailable=false;
+  const f=standaloneFixture(dir,{bridgeFailure:r=>{if(unavailable&&r.command==='read')throw new Error('EDITOR_UNAVAILABLE');}});
+  t.after(async()=>{await f.close();rmSync(dir,{recursive:true,force:true});});
+  await f.send('om_open','小婕 okr 讨论');const parent=f.sent.at(-1).message_id;
+  unavailable=true;
+  const error=await f.send('om_read_error','合成回答',{parent});
+  assert.equal(error.code,'EDITOR_UNAVAILABLE');assert.match(error.receipt,/编辑窗口/);assert.match(error.receipt,/打开备忘录/);assert.match(error.receipt,/续接/);
+  const operations=f.operations.length,calls=f.guideCalls;
+  const hint=await f.send('om_typo','重置分析',{parent});
+  assert.equal(hint.status,'okr_retry_help');assert.match(hint.receipt,/重试分析/);
+  assert.equal(f.operations.length,operations);assert.equal(f.guideCalls,calls);
+});
 test('失败回执说明超时和保存状态，关联重试复用原回答且重投重启不重调',async t=>{
   const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
   const dir=mkdtempSync(join(tmpdir(),'okr-retry-'));let seen=[];

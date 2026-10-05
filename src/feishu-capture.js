@@ -200,7 +200,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       const action = parsed.action === 'query' ? 'query' : blockedReply ? undefined : linkedOkr ? event.text.trim() === '确认定稿' ? 'confirm'
         : /^(暂停|先停一下)$/u.test(event.text.trim()) ? 'pause' : 'record' : parsed.action;
       const text = action !== 'record' ? '' : linkedOkr ? event.text : parsed.text;
-      if (retryRequested && !event.retryOf) result = { status:'okr_retry_unavailable', receipt:'请回复原“分析未完成”回执发送“重试分析”，以定位已保存的回答；未调用模型。' };
+      if ((linkedOkr ? event.text.trim() : instruction) === '重置分析') result = { status:'okr_retry_help', receipt:'恢复分析请回复原“分析未完成”回执发送“重试分析”（试，不是置）。本次未清空记录、未调用模型或写入备忘录。' };
+      else if (retryRequested && !event.retryOf) result = { status:'okr_retry_unavailable', receipt:'请回复原“分析未完成”回执发送“重试分析”，以定位已保存的回答；未调用模型。' };
       else if (!okr) result = { status: 'okr_unavailable', receipt: 'OKR 备忘录尚未配置，请先启用 OKR 记录功能。' };
       else if (!action || event.type !== 'text') result = { status: 'okr_help', receipt: '请发送“小婕 okr 讨论/续接”，回复关联消息记录文字，或使用“小婕 okr 记录：内容”“小婕 okr 暂停”。查询当前目标可用“小婕 okr 查询当前目标”；规划和调整尚未实现；定稿须回复当前草案“确认定稿”。' };
       else {
@@ -220,12 +221,13 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
             : code === 'ACCESSIBILITY_DENIED' ? '网关运行程序（node）的辅助功能权限未开启，请在 macOS“隐私与安全性 → 辅助功能”中开启后再试。'
             : code === 'APPLE_TIMEOUT' ? '备忘录操作超时。请保留原消息，核对保存状态后恢复，避免重复提交。'
             : code === 'NOTES_UI_BUSY' ? '备忘录正在被另一项操作使用。请保留原消息，待操作结束后核对恢复。'
+            : code === 'EDITOR_UNAVAILABLE' ? '未找到可读取的备忘录编辑窗口。请打开备忘录并保持窗口可见，再发送“小婕 okr 续接”核对已保存进度；恢复模型分析须回复原分析失败回执发送“重试分析”。'
             : code === 'PERMISSION_DENIED' ? '请检查网关运行程序控制备忘录的自动化权限。'
             : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
             : '请保留原消息，核对备忘录后再继续。';
           const operation = ['bind', 'find', 'create', 'read', 'append', 'replace'].includes(error.operation) ? error.operation : 'unknown';
           store.set('okr-error:' + hash([event.senderId, event.conversationId, event.id]), { code, operation, at: now?.() ?? new Date().toISOString() });
-          result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。${explanation}` };
+          result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。原因：${code}（${operation}）。${explanation}` };
         }
       }
     } else if ((entry?.module === 'gtd' || !entry) && !taskQuery(command) && (selectionCandidate(command || event.text)
