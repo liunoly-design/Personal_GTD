@@ -27,3 +27,5 @@ TDD公开模型/可信飞书边界先红：invalid JSON不能传播可核实原�
 修复只派发一次粘贴，保持临时剪贴板直到有界正文读回核验；旧正文未变化时仅取AX值，避免标签展开改变待粘贴选区。相同正文跳过粘贴仍验证格式。保留未知结果pending及原60秒桥接预算，无自动重投。WRITE_RESULT_UNKNOWN/UPDATE_RESULT_UNKNOWN/READBACK_FAILED回执说明正文或格式未核对成功，提供“小婕 okr 续接”和持续失败联系维护者的步骤，避免将未知写入当作新模型重试。
 
 TDD：合成350ms延迟读回及持续未改变有界失败先红后绿；可信飞书未知写入→明确恢复回执→续接核对不重跑模型先红后绿。完整245项通过，npm run check和git diff --check通过。单agent规范及需求顺序审查：不改身份/绑定/预算，保持原回答及pending，核对后仅一次恢复，不自动重试未知写入，错误不泄露正文。真实恢复前再次read断言正文等于已备份写前、marker不存在，再以expectedBody执行一次replace；真实后read正文与pending投影完全一致，标签和标题完整，同noteId，模型调用0、新Notes0、飞书主动发送0。此次恢复证明当前投影可完整落盘，不能代替后续飞书新消息或长期时序稳定性验收。
+
+02b1a38实现、b6129df说明导出f603-write-20261006-b6129df，插件隔离校验通过；切换前备份主机/runtime、4状态库与usage，仅替换PGTD路径，受测源码字节一致，runtime原字节保留。网关重载restarted，最终PID95987 running、RPC ok=true，插件loaded/source为新快照。重载期间首次RPC不可达，后续日志及RPC证明恢复，不覆盖其他并行插件更新。恢复后原只读检查从红转绿：marker/text/projection/tags/headings全部true，模型调用0。pending仍保留，须用户发送“小婕 okr 续接”走正常会话核对和清除，不手工删除状态。本次代码/说明已本地提交，未推送。后续真实新回答写入稳定性仍待验收。
