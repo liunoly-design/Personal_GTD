@@ -5,12 +5,15 @@ const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex
 const html=text=>text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll('\n','<br>');
 const canonical=text=>text.replaceAll('\r\n','\n').trim();
 const method={id:'dopl-original',version:1};
-const help=()=>({status:'review_help',receipt:'手动每日心得：先发送“小婕 review 注册 DOPL”并回复“确认注册”；之后发送“小婕 review 每日心得”，回复问题提供原文，再回复当前草案“确认保存”。“续接”核对进度，“取消”结束本次。查询、补记、修订、专题及定时复盘尚未交付。',modelCalls:0});
+const help=()=>({status:'review_help',receipt:'手动每日心得：先发送“小婕 review 注册 DOPL”并回复“确认注册”；之后发送“小婕 review 每日心得”，回复问题提供原文，再回复当前草案“确认保存”。“续接”核对进度，“取消”结束本次。同日已有记录可关联选择合并或替换，补记请显式指定日期；查询、专题及定时复盘尚未交付。',modelCalls:0});
 export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'}) {
  config=structuredClone(config);
  if(![config.account,config.folder].every(v=>typeof v==='string'&&v.trim()&&v.length<=200)
    || !Number.isSafeInteger(config.year)||config.year<1970||config.year>9999
    ||(config.noteId!==undefined&&(typeof config.noteId!=='string'||!config.noteId)))throw new Error('INVALID_REVIEW_CONFIG');
+ const annualNotes=config.annualNotes??{};
+ if(typeof annualNotes!=='object'||Array.isArray(annualNotes)||Object.keys(annualNotes).length>20
+   ||Object.entries(annualNotes).some(([year,v])=>!/^\d{4}$/u.test(year)||Number(year)<1970||Number(year)>9999||Number(year)===config.year||!v||typeof v.noteId!=='string'||!v.noteId.trim()))throw new Error('INVALID_REVIEW_CONFIG');
  Temporal.Now.zonedDateTimeISO(timeZone);
  const location={account:config.account,folder:config.folder,year:config.year,noteId:config.noteId??null,timeZone};
  const store=openOperationStore(statePath),token=randomUUID();
@@ -43,24 +46,40 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
   const text=event.text.trim(),date=Temporal.Instant.from(event.sentAt).toZonedDateTimeISO(timeZone).toPlainDate().toString();
   const session=store.get(sessionKey);
   const matching=kind=>event.link?.kind===kind&&event.link.version===session?.version;
-  const scope=()=>({accountId:store.get('note')?.accountId,folderId:store.get('note')?.folderId});
-  const read=async()=>{
-    const binding=store.get('note');if(!binding?.noteId)throw new Error('RECOVERY_REQUIRED');
-    const n=await call({...scope(),command:'read',noteId:binding.noteId});
+  const noteKey=year=>year===config.year?'note':'note:'+year;
+  const scope=(year=config.year)=>({accountId:store.get(noteKey(year))?.accountId,folderId:store.get(noteKey(year))?.folderId});
+  const read=async(year=config.year)=>{
+    let binding=store.get(noteKey(year));
+    if(year!==config.year){
+      const target=annualNotes[year];if(!target)throw new Error('YEAR_NOT_BOUND');
+      if(binding&&binding.noteId!==target.noteId)throw new Error('BINDING_CHANGED');
+      if(!binding){const ids=await call({command:'bind',account:config.account,folder:config.folder});
+        if(!ids?.accountId||!ids?.folderId)throw new Error('READBACK_FAILED');
+        binding={...ids,title:`${year}-DOPL`,noteId:target.noteId};store.set(noteKey(year),binding);}
+    }
+    if(!binding?.noteId)throw new Error('RECOVERY_REQUIRED');
+    const n=await call({...scope(year),command:'read',noteId:binding.noteId});
     if(n?.id!==binding.noteId||typeof n.body!=='string'||typeof n.plaintext!=='string'||n.tagsComplete===false||n.headingsComplete===false)throw new Error('READBACK_FAILED');
     if(n.plaintext.split(/\r?\n/u).find(line=>line.trim())?.trim()!==binding.title)throw new Error('LOCATION_NOT_UNIQUE');
     if(n.body.length>131072||Array.from(n.plaintext).length>65536)throw new Error('CAPACITY_EXCEEDED');
     return n;
   };
+  const sessionYear=()=>Number((session?.date??date).slice(0,4));
   const existing=(n,d)=>{
     const heading=d.slice(5).replace('-','')+'-心得';
-    const lines=n.plaintext.split(/\r?\n/u),i=lines.findIndex(line=>line.trim()===heading);
-    if(i<0)return null;
-    let end=lines.findIndex((line,j)=>j>i&&(/^[0-9]{4}-心得$/u.test(line.trim())||/^PGTD-DOPL-ENTRY-/u.test(line.trim())));
+    const lines=n.plaintext.split(/\r?\n/u),indices=lines.flatMap((line,i)=>line.trim()===heading?[i]:[]);
+    if(indices.length>1)throw new Error('LOCATION_NOT_UNIQUE');
+    if(!indices.length)return null;
+    const start=indices[0];
+    let end=lines.findIndex((line,j)=>j>start&&(/^[0-9]{4}-心得$/u.test(line.trim())||/^PGTD-DOPL-(?:ENTRY|HISTORY)-/u.test(line.trim())));
     if(end<0)end=lines.length;
-    return {heading,text:lines.slice(i+1,end).join('\n').trim()};
+    return {heading,text:lines.slice(start+1,end).join('\n'),start,end,managed:/^PGTD-DOPL-ENTRY-[0-9a-f-]{36}$/u.test(lines[end]?.trim()??'')};
   };
-  const duplicate=(n,d)=>{const e=existing(n,d);return e?{status:'review_existing',date:d,noteId:n.id,receipt:`${d}已有${e.heading}：\n${e.text}\n请选择合并或替换；同日修订属于F614/T02，本版保留原文且不新增第二条。`}:null;};
+  const duplicate=(n,d)=>{
+    const e=existing(n,d);if(!e)return null;
+    const version=randomUUID(),result={status:'review_existing',date:d,noteId:n.id,reviewLink:{kind:'choice',version},receipt:`${d}已有${e.heading}：\n${e.text}\n请选择合并或替换，回复本回执“合并”或“替换”。合并保留旧原文并追加补充；替换使用你提供的完整新稿。两者均先展示草案、确认后保存，并保留旧原文历史。`};
+    store.set(sessionKey,{phase:'choice',version,date:d,noteBody:n.body,result});return result;
+  };
   async function bindNote(){
     let binding=store.get('note');
     if(!binding){const ids=await call({command:'bind',account:config.account,folder:config.folder});if(!ids?.accountId||!ids?.folderId)throw new Error('READBACK_FAILED');
@@ -82,7 +101,7 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
     if(pending){
       if(pending.sessionKey!==sessionKey)return finish({status:'review_recovery_required',receipt:'另一个会话有待核对写入，请原用户在原会话发送“小婕 review 续接”；本次未写入。'});
       if(text!=='续接')return finish({status:'review_recovery_required',receipt:'上次保存结果待核对，请发送“小婕 review 续接”；不要重复提交心得。'});
-      const n=await read();
+      const n=await read(pending.year??config.year);
       if(canonical(n.plaintext)!==canonical(pending.expectedPlaintext))throw new Error('WRITE_RESULT_UNKNOWN');
       store.transaction(()=>{store.set(pending.key,{fingerprint:pending.fingerprint,result:pending.result});store.set(sessionKey,null);store.set('pending',null);});
       return finish(pending.result);
@@ -99,42 +118,70 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
     }
     if(!store.get('registration'))return finish({status:'review_needs_registration',receipt:'每日心得尚未注册，请发送“小婕 review 注册 DOPL”，核对位置后回复确认。'});
     if(text==='取消'){store.set(sessionKey,null);return finish({status:'review_cancelled',receipt:'本次心得草案已取消，未保存心得。'});}
-    if(['每日心得','DOPL','dopl','续接'].includes(text)){
-      if(text==='续接'&&session?.phase==='draft')return finish({...session.result});
-      if(!date.startsWith(String(config.year)+'-'))return finish({status:'review_year_unbound',receipt:`当前仅绑定${config.year}-DOPL；消息日期${date}属于其他年度，未新建或写入。`});
-      const n=await read(),dup=duplicate(n,date);if(dup){store.set(sessionKey,null);return finish(dup);}
-      const version=randomUUID();store.set(sessionKey,{phase:'question',version,date,noteBody:n.body});
-      return finish({status:'review_question',date,reviewLink:{kind:'question',version},receipt:`${date}的每日一点心得是什么？请回复这条消息提供原文；我会先展示草案，确认后保存。`});
+    let targetDate=date;const backfill=/^补记(?:\s|$)/u.test(text);
+    if(backfill){
+      const match=/^补记\s+(\d{4}-\d{2}-\d{2})$/u.exec(text);
+      let valid=false;if(match){try{valid=Temporal.PlainDate.from(match[1]).toString()===match[1]&&match[1]<=date;}catch{}}
+      if(!valid)return finish({status:'review_needs_date',receipt:'补记请明确指定有效日期：小婕 review 补记 YYYY-MM-DD（不能晚于消息当天）。相对日期或缺失日期不猜测；未写入。'});
+      targetDate=match[1];
+    }
+    if(['每日心得','DOPL','dopl','续接'].includes(text)||backfill){
+      if(text==='续接'&&['draft','question','choice'].includes(session?.phase)){
+        if(session.result)return finish(session.result);
+        // T01 persisted questions before storing their receipt in the session.
+        return finish({status:'review_question',date:session.date,reviewLink:{kind:'question',version:session.version},receipt:`${session.date}的每日一点心得是什么？请回复这条消息提供原文；我会先展示草案，确认后保存。`});
+      }
+      const year=Number(targetDate.slice(0,4));
+      if(year!==config.year&&!annualNotes[year])return finish({status:'review_year_unbound',receipt:`${targetDate}年度${year}-DOPL未绑定；请维护者明确配置该年度现有笔记的真实ID，未新建或写入。`});
+      const n=await read(year),dup=duplicate(n,targetDate);if(dup)return finish(dup);
+      const version=randomUUID();store.set(sessionKey,{phase:'question',version,date:targetDate,noteBody:n.body,result:{status:'review_question',date:targetDate,reviewLink:{kind:'question',version},receipt:`${targetDate}的每日一点心得是什么？请回复这条消息提供原文；我会先展示草案，确认后保存。`}});
+      return finish(store.get(sessionKey).result);
     }
     if(text==='确认保存'){
       if(!matching('draft')||session?.phase!=='draft')return finish({status:'review_needs_confirmation',receipt:'请回复当前心得草案“确认保存”；未写入。'});
       if(config.writeEnabled!==true)throw new Error('PERMISSION_DENIED');
-      const n=await read(),dup=duplicate(n,session.date);if(dup){store.set(sessionKey,null);return finish(dup);}
+      const n=await read(sessionYear());
       if(n.body!==session.noteBody)throw new Error('CONFLICT');
       const marker='PGTD-DOPL-ENTRY-'+session.version;
       const addition=`<div>${session.heading}</div><div>${html(session.answer)}</div><div>${marker}</div>`;
-      if((n.body+addition).length>131072)throw new Error('CAPACITY_EXCEEDED');
-      const expectedPlaintext=canonical(n.plaintext)+'\n'+session.heading+'\n'+session.answer+'\n'+marker;
-      if(Array.from(expectedPlaintext).length>65536)throw new Error('CAPACITY_EXCEEDED');
-      const result={status:'review_saved',date:session.date,noteId:n.id,method,modelCalls:0,receipt:`已保存${session.date}每日心得：${config.account}/${config.folder}/${config.year}-DOPL\n${session.heading}\n${session.answer}\n笔记ID：${n.id}；原文方法v1，已读回核验，零模型调用。`};
-      store.set('pending',{key,fingerprint,sessionKey,result,expectedPlaintext});
-      await call({...scope(),command:'append',noteId:n.id,expectedBody:n.body,addition});
-      const after=await read();if(canonical(after.plaintext)!==canonical(expectedPlaintext))throw new Error('READBACK_FAILED');
+      let expectedPlaintext=canonical(n.plaintext)+'\n'+session.heading+'\n'+session.answer+'\n'+marker,body;
+      if(session.mode){
+        const previous=existing(n,session.date);if(!previous?.managed)throw new Error('UNSUPPORTED_ENTRY');
+        const lines=n.plaintext.split(/\r?\n/u);
+        lines.splice(previous.start,previous.end-previous.start+1,session.heading,session.answer,marker);
+        lines.push('PGTD-DOPL-HISTORY-'+session.version,`修订历史 ${session.date}（${session.mode}）`,'旧心得原文',previous.text,'PGTD-DOPL-HISTORY-END-'+session.version);
+        expectedPlaintext=canonical(lines.join('\n'));body=`<div>${html(expectedPlaintext)}</div>`;
+      }else {const dup=duplicate(n,session.date);if(dup)return finish(dup);}
+      if((body??(n.body+addition)).length>131072||Array.from(expectedPlaintext).length>65536)throw new Error('CAPACITY_EXCEEDED');
+      const result={status:session.mode?'review_revised':'review_saved',date:session.date,noteId:n.id,method,modelCalls:0,receipt:`已${session.mode?'修订':'保存'}${session.date}每日心得：${config.account}/${config.folder}/${sessionYear()}-DOPL\n${session.heading}\n${session.answer}\n笔记ID：${n.id}；原文方法v1，已读回核验，零模型调用。${session.mode?'旧原文已保留在年度笔记修订历史。':''}`};
+      store.set('pending',{key,fingerprint,sessionKey,year:sessionYear(),result,expectedPlaintext});
+      await call({...scope(sessionYear()),noteId:n.id,expectedBody:n.body,...(session.mode?{command:'replace',body}:{command:'append',addition})});
+      const after=await read(sessionYear());if(canonical(after.plaintext)!==canonical(expectedPlaintext))throw new Error('READBACK_FAILED');
       store.transaction(()=>{store.set('pending',null);store.set(sessionKey,null);});return finish(result);
+    }
+    if(['合并','替换'].includes(text)){
+      if(!matching('choice')||session?.phase!=='choice')return finish({status:'review_needs_confirmation',receipt:'请回复当前已有条目回执选择“合并”或“替换”；未写入。'});
+      const n=await read(sessionYear());if(n.body!==session.noteBody)throw new Error('CONFLICT');
+      const previous=existing(n,session.date);if(!previous?.managed)throw new Error('UNSUPPORTED_ENTRY');
+      const version=randomUUID(),result={status:'review_question',date:session.date,reviewLink:{kind:'question',version},receipt:`${session.date}选择${text}。${text==='合并'?'请回复本问题提供补充原文，完整草案将保留旧原文并换行追加补充。':'请回复本问题提供完整替换新稿。'}确认前不写入，保存后保留旧原文历史。`};
+      store.set(sessionKey,{phase:'question',version,date:session.date,mode:text,oldAnswer:previous.text,noteBody:n.body,result});return finish(result);
     }
     if(event.link?.kind==='question'&&matching('question')&&session?.phase==='question'){
       if(/(?:^|\n)\s*[0-9]{4}-心得\s*(?:$|\n)|PGTD-DOPL-/u.test(event.text))return finish({status:'review_invalid',receipt:'原文包含年度记录保留标题或核对标记，请改写该行后再回复提问；未写入。'});
       if(!text)return finish({status:'review_invalid',receipt:'心得为空，未保存。请回复提问提供非空原文。'});
-      const n=await read(),dup=duplicate(n,session.date);if(dup)return finish(dup);
+      const n=await read(sessionYear());if(n.body!==session.noteBody)throw new Error('CONFLICT');
+      if(!session.mode){const dup=duplicate(n,session.date);if(dup)return finish(dup);}
+      const answer=session.mode==='合并'?session.oldAnswer+'\n'+event.text:event.text;
+      if(Array.from(answer).length>4000)return finish({status:'review_invalid',receipt:'完整心得超过4000字，请精简补充或重新选择替换提供精简完整新稿；未写入。'});
       const version=randomUUID(),heading=session.date.slice(5).replace('-','')+'-心得';
-      const result={status:'review_draft',date:session.date,reviewLink:{kind:'draft',version},receipt:`每日心得草案（未保存）\n${session.date} · ${heading}\n${event.text}\n来源：用户原文；方法dopl-original/v1。\n回复本草案“确认保存”或“取消”。`};
-      store.set(sessionKey,{phase:'draft',version,date:session.date,heading,answer:event.text,noteBody:n.body,result});return finish(result);
+      const result={status:'review_draft',date:session.date,reviewLink:{kind:'draft',version},receipt:`每日心得草案（未保存）\n${session.date} · ${heading}\n${answer}\n${session.mode?'操作：'+session.mode+'；旧原文将保留在修订历史。\n':''}来源：用户原文；方法dopl-original/v1。\n回复本草案“确认保存”或“取消”。`};
+      store.set(sessionKey,{phase:'draft',version,date:session.date,heading,answer,mode:session.mode,noteBody:n.body,result});return finish(result);
     }
     return finish(help());
   }catch(error){
-    const codes=['CONFLICT','PERMISSION_DENIED','ACCESSIBILITY_DENIED','LOCATION_NOT_UNIQUE','UNSUPPORTED_NOTE','UNSUPPORTED_FOLDER','CAPACITY_EXCEEDED','BUDGET_EXHAUSTED','NOTE_NOT_BOUND','RECOVERY_REQUIRED','CREATE_RESULT_UNKNOWN','READBACK_FAILED','WRITE_RESULT_UNKNOWN','APPLE_TIMEOUT','NOTES_UI_BUSY','EDITOR_UNAVAILABLE','UI_FOCUS_CHANGED','APPLE_RESULT_UNKNOWN','BRIDGE_UNAVAILABLE'];
+    const codes=['CONFLICT','INVALID_INPUT','AX_SELECTION_FAILED','HEADING_FORMAT_FAILED','TAG_READ_FAILED','TAG_WRITE_FAILED','TAG_WRITE_INCOMPLETE','TAG_DELIMITER_REQUIRED','BINDING_CHANGED','YEAR_NOT_BOUND','PERMISSION_DENIED','ACCESSIBILITY_DENIED','LOCATION_NOT_UNIQUE','UNSUPPORTED_NOTE','UNSUPPORTED_ENTRY','UNSUPPORTED_FOLDER','CAPACITY_EXCEEDED','BUDGET_EXHAUSTED','NOTE_NOT_BOUND','RECOVERY_REQUIRED','CREATE_RESULT_UNKNOWN','READBACK_FAILED','WRITE_RESULT_UNKNOWN','APPLE_TIMEOUT','NOTES_UI_BUSY','EDITOR_UNAVAILABLE','UI_FOCUS_CHANGED','APPLE_RESULT_UNKNOWN','BRIDGE_UNAVAILABLE'];
     const code=codes.includes(error.message)?error.message:'NOTES_UNAVAILABLE';
-    return finish({status:'review_error',code,receipt:`每日心得未确认完成。原因：${code}。${store.get('pending')?'已保留原文与待核对写入，请保持备忘录可见，发送“小婕 review 续接”只读核对；不自动重写。':code==='CONFLICT'?'备忘录已被修改，原文草案保留；请重新发送“小婕 review 每日心得”读取最新内容后确认。':'配置/问答进度保留，未宣称保存成功。请处理权限或位置问题后重新发起；未知创建不得新建替代笔记。'}`});
+    return finish({status:'review_error',code,receipt:`每日心得未确认完成。原因：${code}。${store.get('pending')?'已保留原文与待核对写入，请保持备忘录可见，发送“小婕 review 续接”只读核对；不自动重写。':code==='CONFLICT'?`备忘录已被修改，原文草案保留；请重新发送“小婕 review ${session?.date?'补记 '+session.date:'每日心得'}”读取最新内容后确认。`:code==='UNSUPPORTED_ENTRY'?'已有条目缺少可信结束标记，无法确认替换范围；原文保留，请维护者核对该日期条目边界后重新发起。':'配置/问答进度保留，未宣称保存成功。请处理权限或位置问题后重新发起；未知创建不得新建替代笔记。'}`});
   }
  }
  return {handle(event){if(closed)throw new Error('Review closed');const task=queue.then(()=>processEvent(event));queue=task.catch(()=>{});return task;},async close(){if(closed)return;closed=true;await queue;if(store.get('owner')?.token===token)store.set('owner',null);store.close();}};

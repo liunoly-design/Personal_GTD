@@ -114,3 +114,153 @@ test('飞书原消息身份、编辑及指纹保护在Review路径同样生效',
  assert.equal((await f.send('om_confirm','确认保存 ',{parent:d.parent})).status,'event_conflict');
  assert.equal(f.operations.filter(x=>x==='append').length,1);
 });
+
+async function saveOriginal(f){await register(f);const d=await draft(f,'initial','原心得：先核对事实。');await f.send('om_initial_save','确认保存',{parent:d.parent});}
+async function revise(f,mode,suffix,answer){
+ const existing=await f.send('om_existing_'+suffix,'小婕 review 每日心得');
+ const choiceParent=f.sent.at(-1).message_id;
+ const question=await f.send('om_choose_'+suffix,mode,{parent:choiceParent});
+ const draft=await f.send('om_revision_'+suffix,answer,{parent:f.sent.at(-1).message_id});
+ return {existing,question,draft,parent:f.sent.at(-1).message_id};
+}
+test('同日合并必须先选择、询问补充、展示完整草案，确认保留一条与旧原文历史',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);const before=f.notes[0].plaintext;
+ const r=await revise(f,'合并','merge','补充：再决定行动。');
+ assert.equal(r.existing.status,'review_existing');assert.equal(r.question.status,'review_question');
+ assert.equal(r.draft.status,'review_draft');assert.match(r.draft.receipt,/原心得：先核对事实。\n补充：再决定行动。/);
+ assert.equal(f.notes[0].plaintext,before);
+ const saved=await f.send('om_merge_save','确认保存',{parent:r.parent});assert.equal(saved.status,'review_revised');
+ const note=f.notes[0].plaintext;assert.equal(note.split('1006-心得').length-1,1);
+ assert.match(note,/1006-心得\n原心得：先核对事实。\n补充：再决定行动。\nPGTD-DOPL-ENTRY-/);
+ assert.match(note,/修订历史 2026-10-06（合并）\n旧心得原文\n原心得：先核对事实。\nPGTD-DOPL-HISTORY-END-/);
+ assert.equal(f.operations.filter(x=>x==='replace').length,1);assert.equal(saved.modelCalls,0);
+});
+
+test('显式日期补记沿用原日期，缺失/相对/非法/未来日期不猜测不写入',async t=>{
+ const {f}=fixture(t);await register(f);
+ for(const [i,text] of ['补记','补记 昨天','补记 2026-02-30','补记 2026-10-07','补记 2026-10-01 额外文字'].entries()){
+  const r=await f.send('om_bad_date_'+i,'小婕 review '+text);assert.equal(r.status,'review_needs_date');
+ }
+ assert.ok(!f.operations.includes('append'));
+ const q=await f.send('om_backfill','小婕 review 补记 2026-10-01');assert.equal(q.status,'review_question');assert.equal(q.date,'2026-10-01');
+ const d=await f.send('om_backfill_answer','显式补记合成原文',{parent:f.sent.at(-1).message_id,sentAt:'2026-10-07T01:00:00+08:00'});
+ assert.equal(d.date,'2026-10-01');
+ const saved=await f.send('om_backfill_save','确认保存',{parent:f.sent.at(-1).message_id});assert.equal(saved.status,'review_saved');
+ assert.match(f.notes[0].plaintext,/1001-心得\n显式补记合成原文/);assert.ok(!f.notes[0].plaintext.includes('1006-心得'));
+});
+
+test('跨年补记只写显式年度ID，重启/响应丢失核对同一历史年度',async t=>{
+ let lost=true;const {f}=fixture(t,{config:{review:{account:'synthetic',folder:'Notes',year:2026,allowCreate:true,writeEnabled:true,annualNotes:{2025:{noteId:'history-2025'}}}},bridgeFailure:r=>{if(r.command==='append'&&r.noteId==='history-2025'&&lost)throw new Error('APPLE_RESULT_UNKNOWN');}});
+ f.notes.push({id:'history-2025',title:'2025-DOPL',body:'<div>2025-DOPL</div>',plaintext:'2025-DOPL'});
+ await register(f);const current=f.notes.find(n=>n.title==='2026-DOPL');const before=current.plaintext;
+ const q=await f.send('om_previous','小婕 review 补记 2025-12-31');assert.equal(q.status,'review_question');assert.equal(q.date,'2025-12-31');
+ await f.send('om_previous_answer','去年合成心得',{parent:f.sent.at(-1).message_id});const parent=f.sent.at(-1).message_id;
+ const failed=await f.send('om_previous_save','确认保存',{parent});assert.equal(failed.code,'APPLE_RESULT_UNKNOWN');
+ await f.restart();lost=false;
+ const resumed=await f.send('om_previous_resume','小婕 review 续接');assert.equal(resumed.status,'review_saved');assert.equal(resumed.noteId,'history-2025');assert.match(resumed.receipt,/2025-DOPL/);
+ assert.equal((await f.send('om_previous_save','确认保存',{parent})).status,'review_saved');
+ assert.match(f.notes.find(n=>n.id==='history-2025').plaintext,/1231-心得\n去年合成心得/);assert.equal(current.plaintext,before);assert.equal(f.operations.filter(x=>x==='append').length,1);assert.equal(f.operations.filter(x=>x==='create').length,1);
+});
+
+test('多次替换保留每版旧原文及其他日期正文，空白/HTML字符不丢失、不增第二标题',async t=>{
+ const {f}=fixture(t);await register(f);const old='  原文 <>&"\n第二行  \n';const d=await draft(f,'raw',old);await f.send('om_raw_save','确认保存',{parent:d.parent});
+ await f.send('om_other_date','小婕 review 补记 2026-10-01');await f.send('om_other_answer','其他日期原文',{parent:f.sent.at(-1).message_id});await f.send('om_other_save','确认保存',{parent:f.sent.at(-1).message_id});
+ for(const [i,answer] of ['第一版新稿','第二版新稿'].entries()){
+  const r=await revise(f,'替换','replace_'+i,answer);assert.ok(!r.draft.receipt.includes(old));
+  const saved=await f.send('om_replace_save_'+i,'确认保存',{parent:r.parent});assert.equal(saved.status,'review_revised');
+ }
+ const note=f.notes[0].plaintext;assert.equal(note.split('1006-心得').length-1,1);
+ assert.match(note,/1006-心得\n第二版新稿\nPGTD-DOPL-ENTRY-/);assert.ok(note.includes('旧心得原文\n'+old+'\nPGTD-DOPL-HISTORY-END-'));
+ assert.match(note,/旧心得原文\n第一版新稿\nPGTD-DOPL-HISTORY-END-/);assert.match(note,/1001-心得\n其他日期原文\nPGTD-DOPL-ENTRY-/);
+ assert.equal(note.split('修订历史 2026-10-06（替换）').length-1,2);
+});
+
+test('修订选择、问题和草案可重启续接；旧选择/旧确认/取消均不得写入',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);const before=f.notes[0].plaintext;
+ await f.send('om_old_choice','小婕 review 每日心得');const oldChoice=f.sent.at(-1).message_id;
+ await f.send('om_new_choice','小婕 review 每日心得');const choice=f.sent.at(-1).message_id;await f.restart();
+ const resumed=await f.send('om_choice_resume','小婕 review 续接');assert.equal(resumed.status,'review_existing');
+ assert.equal((await f.send('om_stale_choice','替换',{parent:oldChoice})).status,'review_needs_confirmation');
+ const question=await f.send('om_choice_select','替换',{parent:choice});assert.equal(question.status,'review_question');const parent=f.sent.at(-1).message_id;
+ await f.restart();assert.equal((await f.send('om_question_resume','小婕 review 续接')).status,'review_question');
+ await f.send('om_revision_draft','拟替换原文',{parent});const staleDraft=f.sent.at(-1).message_id;await f.restart();
+ assert.equal((await f.send('om_draft_resume','小婕 review 续接')).status,'review_draft');
+ assert.equal((await f.send('om_revision_bare','小婕 review 确认保存')).status,'review_needs_confirmation');
+ assert.equal((await f.send('om_revision_wrong','确认保存',{parent:staleDraft,sender:'ou_other'})).status,'not_handled');
+ assert.equal((await f.send('om_revision_cancel','小婕 review 取消')).status,'review_cancelled');
+ assert.equal((await f.send('om_revision_after_cancel','确认保存',{parent:staleDraft})).status,'review_needs_confirmation');
+ assert.equal(f.notes[0].plaintext,before);assert.ok(!f.operations.includes('replace'));
+});
+
+test('修订保存响应丢失后跨会话阻塞，重启只读核对一次历史且原确认可重投',async t=>{
+ let lost=false;const {f}=fixture(t,{bridgeFailure:r=>{if(r.command==='replace'&&lost)throw new Error('APPLE_TIMEOUT');}});await saveOriginal(f);
+ const r=await revise(f,'替换','unknown','响应丢失的合成新稿');lost=true;
+ assert.equal((await f.send('om_revision_unknown_confirm','确认保存',{parent:r.parent})).code,'APPLE_TIMEOUT');assert.ok(f.notes[0].plaintext.includes('响应丢失的合成新稿'));
+ await f.restart();lost=false;assert.equal((await f.send('om_revision_other_resume','小婕 review 续接',{sender:'ou_other'})).status,'review_recovery_required');
+ assert.equal((await f.send('om_revision_repeat','确认保存',{parent:r.parent})).status,'review_recovery_required');
+ const recovered=await f.send('om_revision_resume','小婕 review 续接');assert.equal(recovered.status,'review_revised');
+ assert.equal((await f.send('om_revision_unknown_confirm','确认保存',{parent:r.parent})).status,'review_revised');
+ assert.equal(f.operations.filter(x=>x==='replace').length,1);assert.equal(f.notes[0].plaintext.split('修订历史 2026-10-06（替换）').length-1,1);
+});
+
+test('修订写前超时或写后人工改变无法核对时，不盲重写或宣称成功',async t=>{
+ let block=false;const {f}=fixture(t,{beforeBridge:r=>{if(r.command==='replace'&&block)throw new Error('APPLE_TIMEOUT');}});await saveOriginal(f);
+ const before=f.notes[0].plaintext,r=await revise(f,'合并','no-write','未写补充');block=true;
+ assert.equal((await f.send('om_revision_no_write','确认保存',{parent:r.parent})).code,'APPLE_TIMEOUT');await f.restart();
+ assert.equal((await f.send('om_revision_no_write_resume','小婕 review 续接')).code,'WRITE_RESULT_UNKNOWN');assert.equal(f.notes[0].plaintext,before);assert.equal(f.operations.filter(x=>x==='replace').length,1);
+ const {f:g}=fixture(t,{bridgeFailure:r=>{if(r.command==='replace')throw new Error('APPLE_RESULT_UNKNOWN');}});await saveOriginal(g);const d=await revise(g,'替换','edited-after','合成新稿');
+ await g.send('om_write_unknown','确认保存',{parent:d.parent});g.notes[0].body+='<div>写后人工补充</div>';g.notes[0].plaintext+='\n写后人工补充';await g.restart();
+ assert.equal((await g.send('om_write_changed_resume','小婕 review 续接')).code,'WRITE_RESULT_UNKNOWN');assert.equal(g.operations.filter(x=>x==='replace').length,1);assert.ok(g.notes[0].plaintext.endsWith('写后人工补充'));
+});
+
+test('补记修订人工编辑冲突保留草案并提示重新发起原明确日期',async t=>{
+ const {f}=fixture(t);await register(f);await f.send('om_back_date','小婕 review 补记 2026-10-01');await f.send('om_back_date_answer','原补记',{parent:f.sent.at(-1).message_id});await f.send('om_back_date_save','确认保存',{parent:f.sent.at(-1).message_id});
+ await f.send('om_back_date_choice','小婕 review 补记 2026-10-01');await f.send('om_back_date_replace','替换',{parent:f.sent.at(-1).message_id});await f.send('om_back_date_draft','新补记',{parent:f.sent.at(-1).message_id});const parent=f.sent.at(-1).message_id;
+ f.notes[0].body+='<div>人工编辑</div>';f.notes[0].plaintext+='\n人工编辑';
+ const result=await f.send('om_back_date_conflict','确认保存',{parent});assert.equal(result.code,'CONFLICT');assert.match(result.receipt,/小婕 review 补记 2026-10-01/);
+ assert.equal((await f.send('om_back_date_resume','小婕 review 续接')).date,'2026-10-01');assert.ok(!f.operations.includes('replace'));assert.ok(f.notes[0].plaintext.endsWith('人工编辑'));
+});
+
+test('多人同日修订较旧草案不得覆盖已保存的新版本，旧问题和选择也检查快照',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);const old=await revise(f,'替换','older','较旧新稿');
+ await f.send('om_other_choose','小婕 review 每日心得',{sender:'ou_other'});await f.send('om_other_replace','替换',{sender:'ou_other',parent:f.sent.at(-1).message_id});await f.send('om_other_draft','其他用户最新稿',{sender:'ou_other',parent:f.sent.at(-1).message_id});
+ assert.equal((await f.send('om_other_saved','确认保存',{sender:'ou_other',parent:f.sent.at(-1).message_id})).status,'review_revised');
+ assert.equal((await f.send('om_older_confirm','确认保存',{parent:old.parent})).code,'CONFLICT');assert.ok(f.notes[0].plaintext.includes('其他用户最新稿'));assert.ok(!f.notes[0].plaintext.includes('较旧新稿'));
+ await f.send('om_new_choice','小婕 review 每日心得');const choice=f.sent.at(-1).message_id;
+ f.notes[0].body+='<div>选择后人工编辑</div>';f.notes[0].plaintext+='\n选择后人工编辑';
+ assert.equal((await f.send('om_choice_conflict','合并',{parent:choice})).code,'CONFLICT');assert.equal(f.operations.filter(x=>x==='replace').length,1);
+ await f.send('om_latest_choice','小婕 review 每日心得');await f.send('om_latest_merge','合并',{parent:f.sent.at(-1).message_id});const question=f.sent.at(-1).message_id;
+ f.notes[0].body+='<div>提问后人工编辑</div>';f.notes[0].plaintext+='\n提问后人工编辑';
+ assert.equal((await f.send('om_question_conflict','补充',{parent:question})).code,'CONFLICT');assert.equal(f.operations.filter(x=>x==='replace').length,1);
+});
+
+test('历史年度缺绑定、错误标题、改变ID或撤销绑定均不误写当前年度',async t=>{
+ const {f}=fixture(t);await register(f);assert.equal((await f.send('om_unbound_previous','小婕 review 补记 2025-12-31')).status,'review_year_unbound');assert.ok(!f.operations.includes('append'));
+ f.config.review.annualNotes={2025:{noteId:'wrong-title'}};f.notes.push({id:'wrong-title',title:'其他笔记',body:'<div>其他笔记</div>',plaintext:'其他笔记'});await f.restart();
+ assert.equal((await f.send('om_wrong_year_title','小婕 review 补记 2025-12-31')).code,'LOCATION_NOT_UNIQUE');assert.ok(!f.operations.includes('append'));
+ f.config.review.annualNotes={2025:{noteId:'changed-id'}};await f.restart();const calls=f.operations.length;
+ assert.equal((await f.send('om_changed_binding','小婕 review 补记 2025-12-31')).code,'BINDING_CHANGED');assert.equal(f.operations.length,calls);
+ const {f:g}=fixture(t,{config:{review:{account:'synthetic',folder:'Notes',year:2026,allowCreate:true,writeEnabled:true,annualNotes:{2025:{noteId:'valid-year'}}}}});g.notes.push({id:'valid-year',title:'2025-DOPL',body:'<div>2025-DOPL</div>',plaintext:'2025-DOPL'});await register(g);
+ await g.send('om_valid_year','小婕 review 补记 2025-12-31');await g.send('om_valid_year_answer','历史原文',{parent:g.sent.at(-1).message_id});const parent=g.sent.at(-1).message_id;
+ delete g.config.review.annualNotes;await g.restart();assert.equal((await g.send('om_removed_year','确认保存',{parent})).code,'YEAR_NOT_BOUND');assert.ok(!g.operations.includes('append'));assert.equal(g.notes.find(n=>n.id==='valid-year').plaintext,'2025-DOPL');
+});
+
+test('合并超限/未提供补充、损坏边界/重复标题、撤销写权限均不修改旧心得',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);const before=f.notes[0].plaintext;
+ await f.send('om_merge_choose','小婕 review 每日心得');await f.send('om_merge_question','合并',{parent:f.sent.at(-1).message_id});const question=f.sent.at(-1).message_id;
+ assert.equal((await f.send('om_merge_empty','  ',{parent:question})).status,'review_invalid');assert.equal((await f.send('om_merge_large','补'.repeat(3999),{parent:question})).status,'review_invalid');assert.equal(f.notes[0].plaintext,before);
+ const r=await revise(f,'替换','revoked','撤权新稿');f.config.review.writeEnabled=false;await f.restart();assert.equal((await f.send('om_revision_revoked_confirm','确认保存',{parent:r.parent})).code,'PERMISSION_DENIED');assert.ok(!f.operations.includes('replace'));
+ const {f:g}=fixture(t);await register(g);g.notes[0].body+='<div>1006-心得</div><div>无边界人工条目</div>';g.notes[0].plaintext+='\n1006-心得\n无边界人工条目';await g.send('om_manual_existing','小婕 review 每日心得');
+ const unsupported=await g.send('om_manual_choice','替换',{parent:g.sent.at(-1).message_id});assert.equal(unsupported.code,'UNSUPPORTED_ENTRY');assert.match(unsupported.receipt,/核对.*边界/);assert.ok(!g.operations.includes('replace'));
+ g.notes[0].body+='<div>1006-心得</div><div>重复人工条目</div>';g.notes[0].plaintext+='\n1006-心得\n重复人工条目';assert.equal((await g.send('om_duplicate_heading','小婕 review 每日心得')).code,'LOCATION_NOT_UNIQUE');assert.ok(!g.operations.includes('replace'));
+});
+
+test('心得原文以补记一词开头但不是日期指令时，仍完整保留用户原文',async t=>{
+ const {f}=fixture(t);await register(f);const answer='补记昨天的收获让我明白，先核对事实。';const d=await draft(f,'backfill-word',answer);assert.equal(d.result.status,'review_draft');assert.ok(d.result.receipt.includes(answer));
+ assert.equal((await f.send('om_backfill_word_save','确认保存',{parent:d.parent})).status,'review_saved');assert.ok(f.notes[0].plaintext.includes(answer));
+});
+
+test('原生编辑拒绝保留具体失败码和待核对进度，不把拒绝伪报为不可用',async t=>{
+ const {f}=fixture(t,{beforeBridge:r=>{if(r.command==='replace')throw new Error('INVALID_INPUT');}});await saveOriginal(f);const before=f.notes[0].plaintext,d=await revise(f,'替换','native-rejected','合成新稿');
+ const r=await f.send('om_native_rejected_confirm','确认保存',{parent:d.parent});assert.equal(r.code,'INVALID_INPUT');assert.match(r.receipt,/待核对/);assert.equal(f.notes[0].plaintext,before);
+});

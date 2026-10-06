@@ -13,6 +13,7 @@ export function doplFixture(directory, { bridgeFailure, beforeBridge, config: ov
     else if(r.command==='find') value=notes.filter(n=>n.title===r.title&&n.plaintext.includes(r.marker)).map(n=>({...n}));
     else if(r.command==='create') {const n={id:'synthetic-dopl-'+(notes.length+1),title:r.title,body:r.body,plaintext:plain(r.body),tagsComplete:true,headingsComplete:true};notes.push(n);value={...n};}
     else {const n=notes.find(n=>n.id===r.noteId);if(!n)throw new Error('LOCATION_NOT_UNIQUE');
+      if(r.command==='replace'){if(n.body!==r.expectedBody)throw new Error('CONFLICT');n.body=r.body;n.plaintext=plain(n.body);}
       if(r.command==='append'){if(n.body!==r.expectedBody)throw new Error('CONFLICT');n.body+=r.addition;n.plaintext=plain(n.body);}
       value={...n};}
     bridgeFailure?.(r,value);return value;

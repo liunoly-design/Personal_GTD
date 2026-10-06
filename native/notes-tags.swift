@@ -215,10 +215,21 @@ func htmlText(_ s:String) throws -> String {
     return stripped.replacingOccurrences(of:"&quot;",with:"\"").replacingOccurrences(of:"&lt;",with:"<")
         .replacingOccurrences(of:"&gt;",with:">").replacingOccurrences(of:"&amp;",with:"&")
 }
+func replacementAllowed(_ desired:String)->Bool {
+    let okr=(desired.hasPrefix("PGTD OKR 最新稿\n") && desired.contains("PGTD-FINAL-")) || (desired.hasPrefix("PGTD OKR 讨论稿\n") && desired.contains("PGTD-OKR-"))
+    let annual=desired.range(of:"^[0-9]{4}-DOPL\n",options:.regularExpression) != nil
+    let marker=desired.range(of:"(?m)^PGTD-DOPL-(?:ENTRY-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\n|$)",options:.regularExpression) != nil
+    return okr || (annual && marker)
+}
 func run() throws -> [String:Any] {
     let data=FileHandle.standardInput.readDataToEndOfFile()
     guard let input=try JSONSerialization.jsonObject(with:data) as? [String:Any],
           let expectedRaw=input["rawPlaintext"] as? String,let command=input["command"] as? String else {try fail("INVALID_INPUT")}
+    if command == "checkReplacement" {
+        guard expectedRaw.utf16.count<=65536,let fragment=input["html"] as? String else {try fail("INVALID_INPUT")}
+        guard replacementAllowed(try htmlText(fragment)) else {try fail("INVALID_INPUT")}
+        return ["ok":true,"value":["allowed":true]]
+    }
     if command == "checkWriteReadback" {
         nativePhase="paste-readback"
         guard let target=input["target"] as? String,let delay=input["delayMs"] as? Int,
@@ -273,7 +284,7 @@ func run() throws -> [String:Any] {
             let fragment=command == "formatCreated" ? current.0 : try htmlText(input["html"] as? String ?? "")
             var desired=fragment
             if command == "replace" {
-                guard (desired.hasPrefix("PGTD OKR 最新稿\n") && desired.contains("PGTD-FINAL-")) || (desired.hasPrefix("PGTD OKR 讨论稿\n") && desired.contains("PGTD-OKR-")) else {try fail("INVALID_INPUT")}
+                guard replacementAllowed(desired) else {try fail("INVALID_INPUT")}
                 let extras=input["preserveTags"] as? [String] ?? []
                 let extra=extras.filter{tag in
                     let pattern=NSRegularExpression.escapedPattern(for:tag)+"(?![\\p{L}\\p{N}_-])"
