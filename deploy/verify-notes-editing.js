@@ -17,7 +17,7 @@ let note = await callNotes({command:'create', ...scope, title:'PGTD OKR 日志',
 writeFileSync(join(outputDirectory,'test-note.private.json'), JSON.stringify({id:note.id, marker}), {mode:0o600});
 for (let round=0; round<5; round++) {
   const text = `PGTD OKR 讨论稿\n${marker}\n合成轮次 ${round}\n正文标签 #KR6，候选 #O3（待确认）。\n`
-    + Array.from({length:40},(_,i)=>`合成段落 ${i}：仅用于标签转换验收，不含用户信息。`).join('\n')
+    + Array.from({length:100},(_,i)=>`合成段落 ${i}：仅用于标签转换验收，不含用户信息。`).join('\n')
     + '\n## #O1 合成目标\n### #KR1 合成指标\n### #KR2 合成指标\n### #KR3 合成指标\n### #KR4 合成指标\n## #O2 合成目标\n';
   note = await callNotes({command:'replace', ...scope, noteId:note.id, expectedBody:note.body, body:`<div>${escape(text)}</div>`});
   const after = await callNotes({command:'read', ...scope, noteId:note.id});

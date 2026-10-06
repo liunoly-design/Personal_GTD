@@ -93,6 +93,21 @@ func select(_ e:AXUIElement,_ r:NSRange,_ expectedRaw:String? = nil) throws {
     guard AXUIElementSetAttributeValue(e,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success,
           AXUIElementSetAttributeValue(e,kAXSelectedTextRangeAttribute as CFString,AXValueCreate(.cfRange,&range)!) == .success else {try fail("AX_SELECTION_FAILED")}
     if let expected=expectedRaw,try value(e) != expected {try fail("UI_FOCUS_CHANGED")}
+    // AX selection can be accepted before the editor has applied it. Keyboard
+    // input must use the observed range, not merely a successful setter reply.
+    let deadline=ProcessInfo.processInfo.systemUptime+1
+    var stable=0
+    repeat {
+        if let expected=expectedRaw,try value(e) != expected {try fail("UI_FOCUS_CHANGED")}
+        var actual=CFRange(location:-1,length:-1)
+        if let v=get(e,kAXSelectedTextRangeAttribute) {
+            AXValueGetValue(v as! AXValue,.cfRange,&actual)
+        }
+        if actual.location==r.location && actual.length==r.length {stable += 1} else {stable=0}
+        if stable>=2 {return}
+        Thread.sleep(forTimeInterval:0.03)
+    } while ProcessInfo.processInfo.systemUptime<deadline
+    try fail("AX_SELECTION_FAILED")
 }
 func key(_ code:CGKeyCode,_ flags:CGEventFlags=[]) {
     for down in [true,false] {let event=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:down)!;event.flags=flags;event.post(tap:.cghidEventTap)}
@@ -104,15 +119,15 @@ func front(_ app:NSRunningApplication) throws {
 // The action is dispatched once; waiting never replays a mutation.
 func awaitWriteReadback(_ target:String,_ timeout:TimeInterval,_ observe:() throws -> String) throws {
     let deadline=ProcessInfo.processInfo.systemUptime+timeout
-    var matches=0
     repeat {
         do {
-            if try observe().trimmingCharacters(in:.newlines)==target.trimmingCharacters(in:.newlines) {matches += 1} else {matches=0}
-            if matches>=2 {return}
+            // A full attachment read already checks that AXValue stayed unchanged.
+            // Accept that coherent matching snapshot even if the read consumed the
+            // polling window; requiring another full read falsely rejects success.
+            if try observe().trimmingCharacters(in:.newlines)==target.trimmingCharacters(in:.newlines) {return}
         } catch let failure as Failure where ["UNSUPPORTED_NOTE","TAG_READ_FAILED"].contains(failure.code) {
             // Attachment accessibility metadata can lag behind the AX text value.
             // Observe again without redispatching the preceding write.
-            matches=0
         }
         Thread.sleep(forTimeInterval:0.03)
     } while ProcessInfo.processInfo.systemUptime<deadline
@@ -210,6 +225,10 @@ func run() throws -> [String:Any] {
               let timeout=input["timeoutMs"] as? Int,delay>=0,delay<=2000,timeout>0,timeout<=2000 else {try fail("INVALID_INPUT")}
         let start=ProcessInfo.processInfo.systemUptime
         try awaitWriteReadback(target,Double(timeout)/1000) {
+            if let observationDelay=input["observeDelayMs"] as? Int {
+                guard observationDelay>=0,observationDelay<=3000 else {try fail("INVALID_INPUT")}
+                Thread.sleep(forTimeInterval:Double(observationDelay)/1000)
+            }
             let ready=ProcessInfo.processInfo.systemUptime-start>=Double(delay)/1000
             if input["transientAttachment"] as? Bool == true && !ready {try fail("UNSUPPORTED_NOTE")}
             return ready ? target : expectedRaw
