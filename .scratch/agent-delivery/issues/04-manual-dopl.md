@@ -5,7 +5,7 @@ Related features: F610、F611、F612、F613
 Version: 0.4.0
 Legacy index: P04
 Status: ready-for-agent
-State: in-progress
+State: done
 Blocked by: 无新增阻塞；F601/T01 与已有 Notes 能力
 Spec: [F614/T01单项规格](../../f614-dopl/spec.md)
 
@@ -38,3 +38,5 @@ Spec: [F614/T01单项规格](../../f614-dopl/spec.md)
 2026-10-06 本地交付：15项DOPL专项、完整263项、语法、合成demo及隔离插件加载通过；规范/需求顺序审查的恢复回执问题已先红修复。前五项勾选仅指合成行为证据；真实Notes/用户飞书及部署仍待验收，State=in-progress。详见[验收记录](../../../docs/deployment/f614-2026-10-06.md)。
 
 2026-10-06 用户授权新建/部署/推送：真实iCloud/Notes新建2026-DOPL，合成Notes全路径读回/重启/重投/同日唯一通过；原ID受控清理本次合成心得后留空供用户填写。快照216d993中263/263及插件检查通过，已安全重载，PID11241/RPC ok，零新增模型调用。用户实际飞书注册/问答/确认保存尚待验收，State=in-progress；详情见上述验收记录。
+
+2026-10-07 真实用户验收：用户反馈测试通过；只读核对可信飞书保存回执已发送、确认原文与绑定 Notes 一致、1007-心得恰好一条、pending为空，零模型。F614/T01验收关闭；不代表尚未实现的修订/补记/自动调度通过。
