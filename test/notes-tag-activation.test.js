@@ -16,3 +16,10 @@ test('只有标点引用的标签使用临时分隔，不选择或替换原标�
   assert.equal(r.ok,true);assert.equal(r.value.location,4);assert.equal(r.value.length,4);
   assert.equal(r.value.temporaryDelimiter,true);
 });
+test('中文冒号紧贴的正文引用不抢占可激活的结构标题',{skip:process.platform!=='darwin'},()=>{
+  const raw='候选目标：#KR2 合成指标\n### #KR2 合成指标\n';
+  const r=check(raw);assert.equal(r.ok,true);assert.equal(r.value.location,raw.lastIndexOf('#KR2'));assert.equal(r.value.temporaryDelimiter,false);
+});
+test('仅有不支持的冒号引用时保留已有分隔，不插入额外空格',{skip:process.platform!=='darwin'},()=>{
+  const r=check('候选目标：#KR2 合成指标');assert.equal(r.ok,true);assert.equal(r.value.temporaryDelimiter,false);
+});

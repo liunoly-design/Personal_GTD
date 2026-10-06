@@ -12,13 +12,26 @@ func tagActivationRange(_ raw:NSString,_ tag:String) throws -> (range:NSRange,te
     guard !matches.isEmpty else {try fail("TAG_READ_FAILED")}
     // Prose may mention the same tag before its heading, followed by punctuation.
     // Activate an existing whitespace delimiter without inserting or changing text.
-    if let match=matches.first(where:{match in
-        let after=match.range.location+match.range.length
+    let eligible=matches.filter {match in
+        let before=match.range.location
+        let after=before+match.range.length
         guard after<raw.length else {return false}
         let delimiter=raw.substring(with:NSRange(location:after,length:1))
-        return delimiter == " " || delimiter == "\n"
-    }) {return (match.range,false)}
-    return (matches[0].range,true)
+        let prefix=before==0 ? "\n" : raw.substring(with:NSRange(location:before-1,length:1))
+        // Notes does not activate a pasted token touching a preceding colon.
+        return (delimiter == " " || delimiter == "\n") && (prefix == " " || prefix == "\n" || prefix == "\t")
+    }
+    let heading=eligible.first {match in
+        let prefix=raw.substring(to:match.range.location).components(separatedBy:"\n").last ?? ""
+        return ["# ","## ","### "].contains(prefix)
+    }
+    if let match=heading ?? eligible.first {return (match.range,false)}
+    // With no supported prefix, keep an existing delimiter unchanged; do not
+    // turn a failed activation into an extra inserted space.
+    let fallback=matches[0].range
+    let after=fallback.location+fallback.length
+    let delimiter=after<raw.length ? raw.substring(with:NSRange(location:after,length:1)) : ""
+    return (fallback,delimiter != " " && delimiter != "\n")
 }
 func get(_ e:AXUIElement,_ key:String)->CFTypeRef? {
     var value:CFTypeRef?
