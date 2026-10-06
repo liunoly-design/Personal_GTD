@@ -6,6 +6,17 @@ import { join } from 'node:path';
 import { openFeishuCapture } from '../src/feishu-capture.js';
 
 const scope = { accountId:'default', entryAgentId:'xiaojie', allowedSenderIds:['ou_test'], allowedConversationIds:['oc_test'], enabledModules:['okr'] };
+test('未知写入回执给出核对步骤，续接只核对已保存投影不重跑模型',async t=>{
+  const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
+  const dir=mkdtempSync(join(tmpdir(),'okr-write-unknown-'));let uncertain=false;
+  const f=standaloneFixture(dir,{bridgeFailure:r=>{if(uncertain&&r.command==='replace')throw new Error('WRITE_RESULT_UNKNOWN');}});
+  t.after(async()=>{await f.close();rmSync(dir,{recursive:true,force:true});});
+  await f.send('om_open','小婕 okr 讨论');const parent=f.sent.at(-1).message_id;
+  uncertain=true;const failure=await f.send('om_answer','合成背景回答',{parent});
+  assert.equal(failure.code,'WRITE_RESULT_UNKNOWN');assert.match(failure.receipt,/正文.*核对/);assert.match(failure.receipt,/小婕 okr 续接/);assert.match(failure.receipt,/不要.*重试分析/);
+  const calls=f.guideCalls;uncertain=false;
+  const resumed=await f.send('om_resume','小婕 okr 续接');assert.equal(resumed.status,'okr_open');assert.equal(f.guideCalls,calls);
+});
 test('编辑窗口不可用说明原因和恢复，重置分析仅纠正命令而不读写或调用模型',async t=>{
   const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
   const dir=mkdtempSync(join(tmpdir(),'okr-editor-error-'));let unavailable=false;

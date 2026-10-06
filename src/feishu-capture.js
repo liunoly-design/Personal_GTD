@@ -222,6 +222,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
             : code === 'APPLE_TIMEOUT' ? '备忘录操作超时。请保留原消息，核对保存状态后恢复，避免重复提交。'
             : code === 'NOTES_UI_BUSY' ? '备忘录正在被另一项操作使用。请保留原消息，待操作结束后核对恢复。'
             : code === 'EDITOR_UNAVAILABLE' ? '未找到可读取的备忘录编辑窗口。请打开备忘录并保持窗口可见，再发送“小婕 okr 续接”核对已保存进度；恢复模型分析须回复原分析失败回执发送“重试分析”。'
+            : ['WRITE_RESULT_UNKNOWN','UPDATE_RESULT_UNKNOWN','READBACK_FAILED'].includes(code) ? '备忘录正文或格式尚未核对成功，不能确认完整落盘。请打开备忘录并保持窗口可见，再发送“小婕 okr 续接”；系统只核对已保存的待写入内容，不重新分析。若仍失败，请保留原消息并联系维护者核对恢复，不要发送“重试分析”或重复提交原回答。'
             : code === 'PERMISSION_DENIED' ? '请检查网关运行程序控制备忘录的自动化权限。'
             : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
             : '请保留原消息，核对备忘录后再继续。';

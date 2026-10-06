@@ -83,7 +83,17 @@ func key(_ code:CGKeyCode,_ flags:CGEventFlags=[]) {
 func front(_ app:NSRunningApplication) throws {
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier else {try fail("UI_FOCUS_CHANGED")}
 }
-func paste(_ text:String,_ app:NSRunningApplication) throws {
+// Observe completion while the temporary clipboard still belongs to this write.
+// The action is dispatched once; waiting never replays a mutation.
+func awaitWriteReadback(_ target:String,_ timeout:TimeInterval,_ observe:() throws -> String) throws {
+    let deadline=ProcessInfo.processInfo.systemUptime+timeout
+    repeat {
+        if try observe().trimmingCharacters(in:.newlines)==target.trimmingCharacters(in:.newlines) {return}
+        Thread.sleep(forTimeInterval:0.03)
+    } while ProcessInfo.processInfo.systemUptime<deadline
+    try fail("WRITE_RESULT_UNKNOWN")
+}
+func paste(_ text:String,_ app:NSRunningApplication,_ e:AXUIElement,_ target:String) throws {
     try front(app)
     let pb=NSPasteboard.general
     let saved=(pb.pasteboardItems ?? []).map {item in item.types.compactMap {t in item.data(forType:t).map{(t,$0)}}}
@@ -97,8 +107,18 @@ func paste(_ text:String,_ app:NSRunningApplication) throws {
             pb.writeObjects(items)
         }
     }
-    key(9,.maskCommand);Thread.sleep(forTimeInterval:0.15)
+    guard pb.string(forType:.string)==text else {try fail("INVALID_INPUT")}
     try front(app)
+    let beforeRaw=try value(e)
+    // Reading tag attachments changes selection. Do not inspect them while
+    // the paste is queued, or the replacement range could be disturbed.
+    key(9,.maskCommand)
+    try awaitWriteReadback(target,2) {
+        try front(app)
+        let raw=try value(e)
+        if raw==beforeRaw {return "\u{0}"}
+        return try read(e).0
+    }
 }
 func headingRanges(_ text:String)->[(NSRange,[String])] {
     var offset=0;var result:[(NSRange,[String])]=[]
@@ -147,6 +167,15 @@ func run() throws -> [String:Any] {
     let data=FileHandle.standardInput.readDataToEndOfFile()
     guard let input=try JSONSerialization.jsonObject(with:data) as? [String:Any],
           let expectedRaw=input["rawPlaintext"] as? String,let command=input["command"] as? String else {try fail("INVALID_INPUT")}
+    if command == "checkWriteReadback" {
+        guard let target=input["target"] as? String,let delay=input["delayMs"] as? Int,
+              let timeout=input["timeoutMs"] as? Int,delay>=0,delay<=2000,timeout>0,timeout<=2000 else {try fail("INVALID_INPUT")}
+        let start=ProcessInfo.processInfo.systemUptime
+        try awaitWriteReadback(target,Double(timeout)/1000) {
+            ProcessInfo.processInfo.systemUptime-start>=Double(delay)/1000 ? target : expectedRaw
+        }
+        return ["ok":true,"value":["matched":true]]
+    }
     if command == "checkTagActivation" {
         guard expectedRaw.utf16.count<=65536 else {try fail("CAPACITY_EXCEEDED")}
         guard let tag=input["tag"] as? String,tag.utf16.count<=200,tag.range(of:"^#(?:O|KR)[0-9]+$",options:.regularExpression) != nil else {try fail("INVALID_INPUT")}
@@ -194,8 +223,10 @@ func run() throws -> [String:Any] {
             let prospective=try NSRegularExpression(pattern:"(?<![\\p{L}\\p{N}_])#(?:O|KR)[0-9]+(?![\\p{L}\\p{N}_-])")
             let tokens=prospective.matches(in:target,range:NSRange(location:0,length:(target as NSString).length)).map{(target as NSString).substring(with:$0.range)}
             guard Set(tokens+(input["preserveTags"] as? [String] ?? [])).count<=32 else {try fail("CAPACITY_EXCEEDED")}
-            try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length))
-            try paste(desired,app)
+            if trim(current.0) != trim(target) {
+                try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length))
+                try paste(desired,app,e,target)
+            }
             current=try read(e)
             guard trim(current.0)==trim(target) else {try fail("WRITE_RESULT_UNKNOWN")}
         } else if command != "ensureTags" {try fail("INVALID_INPUT")}
