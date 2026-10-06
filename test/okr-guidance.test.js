@@ -58,3 +58,11 @@ test('已有草案的模型只返回单项KR变更，由代码保留O原文并�
   assert.equal(result.draft, '# 2026 第四季度（2026-10-01 至 2026-12-31）\n## #O1 合成学习目标\n策略：每周练习两小时。\n### #KR1 独立完成合成练习\n验收标准：待确认。');
   assert.equal(model.usage().calls, 1);
 });
+
+test('request rejection receipt states HTTP 400 and does not invite blind model retry', async () => {
+  const {guidanceFailureReceipt}=await import('../src/okr-guidance.js');
+  const receipt=guidanceFailureReceipt('MODEL_REQUEST_REJECTED');
+  assert.match(receipt,/HTTP 400/);
+  assert.match(receipt,/维护者/);
+  assert.doesNotMatch(receipt,/发送“重试分析”/);
+});

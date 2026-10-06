@@ -19,6 +19,31 @@ const prices = [
   ['gemini-2.5-flash',0.30,2.50],
 ];
 
+// Provider messages may echo user input or credentials. Persist fixed categories only.
+async function rejectedRequestCategory(response) {
+  const reader = response.body?.getReader();
+  if (!reader) return 'unspecified';
+  try {
+    const chunks = []; let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.length;
+      if (size > 4096) { await reader.cancel(); return 'unspecified'; }
+      chunks.push(value);
+    }
+    const message = JSON.parse(Buffer.concat(chunks).toString('utf8'))?.error?.message;
+    if (typeof message !== 'string') return 'unspecified';
+    if (/api.?key|credential/iu.test(message)) return 'credentials';
+    if (/billing|payment|credit/iu.test(message)) return 'billing';
+    if (/quota/iu.test(message)) return 'quota';
+    if (/thinking/iu.test(message)) return 'thinking_config';
+    if (/schema/iu.test(message)) return 'output_schema';
+    if (/token|context|size|length/iu.test(message)) return 'capacity';
+    return 'unspecified';
+  } catch { return 'unspecified'; }
+  finally { reader.releaseLock(); }
+}
+
 export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, config = {} }) {
   config = { model:'gemini-flash-latest', maxCalls:30, maxBudgetUsd:0.1, maxOutputTokens:1024,
     maxOkrOutputTokens:4096, maxInputBytes:30000, timeoutMs:15000, maxResponseBytes:65536, ...config };
@@ -79,7 +104,12 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
       const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent`, {
         method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body,signal:requestSignal,
       });
-      if (!response.ok) { reason='http_' + response.status; await response.body?.cancel(); throw new Error('Model HTTP failure'); }
+      if (!response.ok) {
+        reason='http_' + response.status;
+        if (isOkr && response.status === 400) record = { ...record, requestRejectionCategory: await rejectedRequestCategory(response) };
+        else await response.body?.cancel();
+        throw new Error('Model HTTP failure');
+      }
       const reader=response.body.getReader(); let length=0; const chunks=[];
       for (;;) { const {done,value}=await reader.read(); if(done)break; length+=value.length;
         if(length>config.maxResponseBytes){reason='response_too_large';await reader.cancel();throw new Error(reason);} chunks.push(value); }
@@ -122,7 +152,7 @@ export function openGeminiAnalyzer({ statePath, apiKey, fetchImpl = fetch, confi
         const known = ['INVALID_GUIDANCE','MULTIPLE_OKR_ITEMS','INCOMPLETE_OBJECTIVE'];
         const codes = { invalid_output:'MODEL_OUTPUT_INVALID', incomplete_output:'MODEL_RESPONSE_INCOMPLETE',
           network_or_timeout:'MODEL_TRANSPORT_FAILED', usage_unknown:'MODEL_USAGE_UNKNOWN', response_too_large:'MODEL_RESPONSE_TOO_LARGE',
-          http_429:'MODEL_RATE_LIMITED', http_401:'MODEL_AUTH_FAILED', http_403:'MODEL_AUTH_FAILED' };
+          http_400:'MODEL_REQUEST_REJECTED', http_429:'MODEL_RATE_LIMITED', http_401:'MODEL_AUTH_FAILED', http_403:'MODEL_AUTH_FAILED' };
         failureCode = reason === 'invalid_output' && known.includes(error?.message) ? error.message : codes[reason] ?? 'MODEL_UNAVAILABLE';
       }
       store.set(id,{...record,state:'failed',latencyMs:performance.now()-started,failureReason:reason,...(failureCode ? {failureCode} : {})});

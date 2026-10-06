@@ -132,3 +132,13 @@ test('凭据解析也受总超时限制，超时前未发送模型请求不计�
     assert.equal(model.usage().calls,0);
   } finally {clearTimeout(keepAlive);}
 });
+
+test('OKR HTTP 400 exposes request rejection and requires maintenance instead of blind retry', async t => {
+  const dir=mkdtempSync(join(tmpdir(),'pgtd-okr-400-'));
+  const model=openGeminiAnalyzer({statePath:join(dir,'usage.sqlite'),apiKey:async()=>'synthetic-key',fetchImpl:async()=>new Response(JSON.stringify({error:{code:400,status:'INVALID_ARGUMENT',message:'response schema rejected; private provider detail'}}),{status:400})});
+  t.after(async()=>{await model.close();rmSync(dir,{recursive:true,force:true});});
+  await assert.rejects(model.discussOkr({answer:'合成优先级回答'}),/MODEL_REQUEST_REJECTED/);
+  assert.equal(model.usage().records[0].failureReason,'http_400');
+  assert.equal(model.usage().records[0].requestRejectionCategory,'output_schema');
+  assert.doesNotMatch(JSON.stringify(model.usage()),/private provider detail/);
+});
