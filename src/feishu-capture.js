@@ -2,6 +2,7 @@ import { completeTask } from './actions/complete-task.js';
 import {maintenanceControl,proposeTaskPlan,executeTaskPlan} from './actions/task-maintenance.js';
 import { selectionCandidate, taskSelection, selectTasks } from './actions/select-tasks.js';
 import { taskQuery, queryTasks, validateQueryConfig } from './actions/query-tasks.js';
+import { openReviewDopl } from './review-dopl.js';
 import { openOkrSession } from './okr-session.js';
 import { explicitEntry, okrInstruction, validateEntryActivation, gtdGuard, legacyOkrInstruction } from './explicit-entries.js';
 import { createHash } from 'node:crypto';
@@ -13,7 +14,7 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 export function enabledModules(config) {
   const modules = config.enabledModules ?? ['gtd', 'okr'];
   if (!Array.isArray(modules) || !modules.length || new Set(modules).size !== modules.length
-    || modules.some(name => !['gtd', 'okr'].includes(name))) throw new Error('Invalid enabledModules');
+    || modules.some(name => !['gtd', 'okr', 'review'].includes(name))) throw new Error('Invalid enabledModules');
   return modules;
 }
 export function validateFeishuScope(config) {
@@ -88,7 +89,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return value;
     },
   };
-  let capture, okr;
+  let capture, okr, review;
   try {
     const scopedReminders = {
       listLists: ({ signal } = {}) => reminders.listLists(options(signal)),
@@ -105,10 +106,15 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
         bridge: request => { options(); return notesBridge(request); },
         guide: okrGuide ? args => okrGuide({ ...args, ...options(args.signal) }) : undefined });
     }
+    if (modules.includes('review') && config.review) {
+      if (typeof notesBridge !== 'function') throw new Error('Notes bridge required');
+      review = openReviewDopl({statePath:join(stateDir,'review.sqlite'),config:config.review,timeZone:config.timeZone,
+        bridge:(request, budgets)=>{options();return notesBridge(request,budgets);}});
+    }
     if (modules.includes('gtd')) capture = openDurableCapture({ journalPath: join(stateDir, 'capture.sqlite'), reminders: scopedReminders, receipts, analyze: scopedAnalyze,
       config: { ...config, externalTimeoutMs: 20000 }, now });
     store.set('account', config.accountId);
-  } catch (error) { void okr?.close(); store.close(); throw error; }
+  } catch (error) { void okr?.close(); void review?.close(); store.close(); throw error; }
   async function handle(ctx) {
     if (!acceptsFeishuContext(ctx, config)) return { status: 'not_handled' };
     const replyTo = ctx.ReplyToIdFull ?? ctx.ReplyToId;
@@ -147,6 +153,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const linkedOkr = !prefix && parent?.route === 'okr' && parent.senderId === event.senderId
       && parent.conversationId === event.conversationId;
     const isOkr = explicitOkr || linkedOkr;
+    const isReview = entry?.module === 'review' || (!prefix && parent?.route === 'review' && parent.senderId === event.senderId && parent.conversationId === event.conversationId);
     const retryRequested = isOkr && (linkedOkr ? event.text.trim() : command) === '重试分析';
     if (retryRequested && parentReceipt?.event) {
       const source = parentReceipt.event;
@@ -175,23 +182,29 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     }
     const cached = store.get('routed-result:' + id);
     const activePlan=store.entries('maintenance:').find(([,p])=>p.state==='running'&&p.executionEvent?.id===id)?.[1];
-    if (cached && store.get('completion:'+id)?.state !== 'write_started' && !activePlan) return deliverRouted(event, cached.result);
+    const refreshReview = isReview && cached?.result.status === 'review_error';
+    if (cached && !refreshReview && store.get('completion:'+id)?.state !== 'write_started' && !activePlan) return deliverRouted(event, cached.result);
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
       rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
     let result;
-    if (!modules.includes(isOkr ? 'okr' : 'gtd') && entry?.module !== 'review') {
+    if (!isReview && !modules.includes(isOkr ? 'okr' : 'gtd')) {
       result = { status: 'module_disabled', receipt: '该模块未启用，请使用已配置的模块入口。' };
       store.set('routed-result:' + id, { event, result });
       return deliverRouted(event, result);
-    } else if ((entry?.module==='gtd'||!entry) && ((parentReceipt?.planId && (!entry||maintenanceControl(command)))
+    } else if (!isReview && (entry?.module==='gtd'||!entry) && ((parentReceipt?.planId && (!entry||maintenanceControl(command)))
       || (maintenanceControl(command||event.text)&&querySnapshot))) {
       const control=maintenanceControl(command||event.text),planId=parentReceipt?.planId;
       result=planId&&!control?{status:'task_plan_help',planId,receipt:'请回复此计划“确认执行”或“取消”。如需修改操作，请回复原任务查询回执重新提出；本次未修改事项。'}
         : planId?await executeTaskPlan({planId,event,control,reminders,config,store,signal:options().signal})
         : {status:'task_plan_needs_reply',receipt:'请回复机器人发出的具体操作计划确认或取消；本次未修改事项。'};
       store.set('routed-result:'+id,{event,result});return deliverRouted(event,result);
-    } else if (entry?.module === 'review') {
-      result = { status: 'review_unavailable', receipt: 'Review 功能尚未实现/启用。日/周/专题复盘及注册均待后续交付，本次未读取或写入业务记录。' };
+    } else if (isReview) {
+      result = !review || !modules.includes('review') ? {status:'review_unavailable',receipt:'Review尚未配置/启用，请配置每日心得保存位置；本次未读写。'}
+        : event.type !== 'text' ? {status:'review_help',receipt:'每日心得仅支持文字，本次未读写。'}
+        : await review.handle({...event,text:prefix?command:event.text,link:parentReceipt?.route==='review' && parentReceipt.senderId===event.senderId && parentReceipt.conversationId===event.conversationId?parentReceipt.reviewLink:undefined});
+      store.set('source:'+id,{...store.get('source:'+id),reviewLink:result.reviewLink});
+      store.set('routed-result:'+id,{event,result});
+      return deliverRouted(event,result);
     } else if (isOkr) {
       const instruction = explicitOkr ? (entry.module === 'okr' ? command : legacyInstruction) : '';
       const parsed = okrInstruction(linkedOkr ? event.text.trim() : instruction);
@@ -322,6 +335,6 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       }
       return results;
     }); },
-    async close() { if (closed) return; closed = true; await queue; await capture?.close(); await okr?.close(); store.close(); },
+    async close() { if (closed) return; closed = true; await queue; await capture?.close(); await okr?.close(); await review?.close(); store.close(); },
   };
 }

@@ -10,10 +10,11 @@ import { openFeishuCapture, enabledModules } from '../src/feishu-capture.js';
 export async function openRuntime({ config, hostConfig, googleKey = openClawGoogleKey }) {
   if (!isAbsolute(config.runtimeConfigPath) || !isAbsolute(config.stateDir)) throw new Error('Absolute private paths required');
   const runtime = JSON.parse(await readFile(config.runtimeConfigPath, 'utf8'));
-  if (!isAbsolute(runtime.usagePath ?? '') || !Number.isFinite(runtime.model?.maxBudgetUsd) || !Number.isSafeInteger(runtime.model?.maxCalls)) {
+  const modules = enabledModules({ ...runtime, ...config });
+  const needsModel = modules.some(name => name === 'gtd' || name === 'okr');
+  if (needsModel && (!isAbsolute(runtime.usagePath ?? '') || !Number.isFinite(runtime.model?.maxBudgetUsd) || !Number.isSafeInteger(runtime.model?.maxCalls))) {
     throw new Error('Explicit shared budget ledger and limits required');
   }
-  const modules = enabledModules({ ...runtime, ...config });
   if (modules.includes('gtd') && !isAbsolute(runtime.remindersHelperPath ?? '')) throw new Error('Absolute Reminders helper path required');
   const channel = hostConfig.channels?.feishu;
   const account = { ...channel, ...channel?.accounts?.[config.accountId] };
@@ -22,23 +23,25 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
   const feishu = createFeishuClient({ credentials: () => ({ appId: account.appId, appSecret: account.appSecret }) });
   let model, reminders, capture;
   try {
-    const apiKey = googleKey({ agentId: runtime.authAgent ?? 'gtd', ...(runtime.openclawPackageDir ? { packageDir: runtime.openclawPackageDir } : {}) });
-    // The host SDK's cold import can block the event loop beyond the task's
-    // analysis deadline. Prepare credentials before starting that deadline.
-    let preparationTimer;
-    try {
-      await Promise.race([Promise.resolve().then(apiKey), new Promise((_, reject) => {
-        preparationTimer = setTimeout(() => reject(new Error('Credential preparation timeout')), 30000);
-      })]);
-    } catch { /* Preserve explicit collection's analysis-failure fallback. */ }
-    finally { clearTimeout(preparationTimer); }
-    model = openGeminiAnalyzer({ statePath: runtime.usagePath, config: runtime.model,
-      apiKey });
+    if (needsModel) {
+      const apiKey = googleKey({ agentId: runtime.authAgent ?? 'gtd', ...(runtime.openclawPackageDir ? { packageDir: runtime.openclawPackageDir } : {}) });
+      // The host SDK's cold import can block the event loop beyond the task's
+      // analysis deadline. Prepare credentials before starting that deadline.
+      let preparationTimer;
+      try {
+        await Promise.race([Promise.resolve().then(apiKey), new Promise((_, reject) => {
+          preparationTimer = setTimeout(() => reject(new Error('Credential preparation timeout')), 30000);
+        })]);
+      } catch { /* Preserve explicit collection's analysis-failure fallback. */ }
+      finally { clearTimeout(preparationTimer); }
+      model = openGeminiAnalyzer({ statePath: runtime.usagePath, config: runtime.model,
+        apiKey });
+    }
     if (modules.includes('gtd')) reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, helperPath: runtime.remindersHelperPath, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
-      reminders, feishu, analyze: model.analyze, notesBridge: callNotes, okrGuide: model.discussOkr });
+      reminders, feishu, analyze: model?.analyze, notesBridge: callNotes, okrGuide: model?.discussOkr });
     return { handle: (ctx, options) => capture.handle(ctx, options), recover: () => capture.recover(), async close() {
-      await capture.close(); reminders?.close(); await model.close();
+      await capture.close(); reminders?.close(); await model?.close();
     } };
   } catch (error) { await capture?.close(); reminders?.close(); await model?.close(); throw error; }
 }

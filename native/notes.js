@@ -31,7 +31,8 @@ function run() {
       var probeTitle = /^PGTD F101 合成测试 PGTD-F101-[a-f0-9-]{36}$/.test(input.title);
       var okrTitle = input.title === 'PGTD OKR 日志' && /PGTD-OKR-[a-f0-9-]{36}/.test(input.body);
       var finalTitle = input.title === 'PGTD OKR 最新稿' && /PGTD-FINAL-[a-f0-9-]{36}/.test(input.body);
-      if ((!probeTitle && !okrTitle && !finalTitle) || typeof input.body !== 'string' || input.body.length > 131072) fail('INVALID_INPUT');
+      var doplTitle = /^[0-9]{4}-DOPL$/.test(input.title) && /PGTD-DOPL-[a-f0-9-]{36}/.test(input.body);
+      if ((!probeTitle && !okrTitle && !finalTitle && !doplTitle) || typeof input.body !== 'string' || input.body.length > 131072) fail('INVALID_INPUT');
       var note = app.Note({ body: input.body });
       folder.notes.push(note);
       value = snapshot(note);
