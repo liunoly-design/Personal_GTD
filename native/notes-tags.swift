@@ -3,6 +3,7 @@ import AppKit
 import ApplicationServices
 
 struct Failure: Error { let code: String }
+var nativePhase="read"
 func fail(_ code:String) throws -> Never { throw Failure(code:code) }
 // Shared by the read-only diagnostic and the native tag activation path.
 func tagActivationRange(_ raw:NSString,_ tag:String) throws -> (range:NSRange,temporaryDelimiter:Bool) {
@@ -83,12 +84,15 @@ func read(_ e:AXUIElement) throws -> (String,[String]) {
     }
     let result=NSMutableString(string:text)
     for (offset,tag) in replacements.sorted(by:{$0.0>$1.0}) {result.replaceCharacters(in:NSRange(location:offset,length:1),with:tag)}
+    guard try value(e)==text else {try fail("TAG_READ_FAILED")}
     return (result as String,Array(Set(replacements.map{$0.1})).sorted())
 }
-func select(_ e:AXUIElement,_ r:NSRange) throws {
+func select(_ e:AXUIElement,_ r:NSRange,_ expectedRaw:String? = nil) throws {
+    if let expected=expectedRaw,try value(e) != expected {try fail("UI_FOCUS_CHANGED")}
     var range=CFRange(location:r.location,length:r.length)
     guard AXUIElementSetAttributeValue(e,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success,
           AXUIElementSetAttributeValue(e,kAXSelectedTextRangeAttribute as CFString,AXValueCreate(.cfRange,&range)!) == .success else {try fail("AX_SELECTION_FAILED")}
+    if let expected=expectedRaw,try value(e) != expected {try fail("UI_FOCUS_CHANGED")}
 }
 func key(_ code:CGKeyCode,_ flags:CGEventFlags=[]) {
     for down in [true,false] {let event=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:down)!;event.flags=flags;event.post(tap:.cghidEventTap)}
@@ -100,13 +104,31 @@ func front(_ app:NSRunningApplication) throws {
 // The action is dispatched once; waiting never replays a mutation.
 func awaitWriteReadback(_ target:String,_ timeout:TimeInterval,_ observe:() throws -> String) throws {
     let deadline=ProcessInfo.processInfo.systemUptime+timeout
+    var matches=0
     repeat {
-        if try observe().trimmingCharacters(in:.newlines)==target.trimmingCharacters(in:.newlines) {return}
+        do {
+            if try observe().trimmingCharacters(in:.newlines)==target.trimmingCharacters(in:.newlines) {matches += 1} else {matches=0}
+            if matches>=2 {return}
+        } catch let failure as Failure where ["UNSUPPORTED_NOTE","TAG_READ_FAILED"].contains(failure.code) {
+            // Attachment accessibility metadata can lag behind the AX text value.
+            // Observe again without redispatching the preceding write.
+            matches=0
+        }
         Thread.sleep(forTimeInterval:0.03)
     } while ProcessInfo.processInfo.systemUptime<deadline
     try fail("WRITE_RESULT_UNKNOWN")
 }
-func paste(_ text:String,_ app:NSRunningApplication,_ e:AXUIElement,_ target:String) throws {
+func readReady(_ e:AXUIElement) throws -> (String,[String]) {
+    let deadline=ProcessInfo.processInfo.systemUptime+2
+    var lastFailure="UNSUPPORTED_NOTE"
+    repeat {
+        do {return try read(e)}
+        catch let failure as Failure where ["UNSUPPORTED_NOTE","TAG_READ_FAILED"].contains(failure.code) {lastFailure=failure.code}
+        Thread.sleep(forTimeInterval:0.03)
+    } while ProcessInfo.processInfo.systemUptime<deadline
+    try fail(lastFailure)
+}
+func paste(_ text:String,_ app:NSRunningApplication,_ e:AXUIElement,_ target:String,_ expectedRaw:String) throws {
     try front(app)
     let pb=NSPasteboard.general
     let saved=(pb.pasteboardItems ?? []).map {item in item.types.compactMap {t in item.data(forType:t).map{(t,$0)}}}
@@ -123,8 +145,10 @@ func paste(_ text:String,_ app:NSRunningApplication,_ e:AXUIElement,_ target:Str
     guard pb.string(forType:.string)==text else {try fail("INVALID_INPUT")}
     try front(app)
     let beforeRaw=try value(e)
+    guard beforeRaw==expectedRaw else {try fail("UI_FOCUS_CHANGED")}
     // Reading tag attachments changes selection. Do not inspect them while
     // the paste is queued, or the replacement range could be disturbed.
+    nativePhase="paste-readback"
     key(9,.maskCommand)
     try awaitWriteReadback(target,2) {
         try front(app)
@@ -160,7 +184,7 @@ func formatHeadings(_ e:AXUIElement,_ root:AXUIElement,_ app:NSRunningApplicatio
     }
     guard headings.isEmpty || get(root,kAXMenuBarAttribute) != nil else {try fail("HEADING_FORMAT_FAILED")}
     for (range,names) in headings where !names.contains(headingStyle(e,range) ?? "") {
-        try front(app);try select(e,range)
+        try front(app);try select(e,range,before)
         guard let menu=find(get(root,kAXMenuBarAttribute) as! AXUIElement,names),AXUIElementPerformAction(menu,kAXPressAction as CFString) == .success else {try fail("HEADING_FORMAT_FAILED")}
         Thread.sleep(forTimeInterval:0.03)
         guard names.contains(headingStyle(e,range) ?? "") else {try fail("HEADING_FORMAT_FAILED")}
@@ -181,11 +205,14 @@ func run() throws -> [String:Any] {
     guard let input=try JSONSerialization.jsonObject(with:data) as? [String:Any],
           let expectedRaw=input["rawPlaintext"] as? String,let command=input["command"] as? String else {try fail("INVALID_INPUT")}
     if command == "checkWriteReadback" {
+        nativePhase="paste-readback"
         guard let target=input["target"] as? String,let delay=input["delayMs"] as? Int,
               let timeout=input["timeoutMs"] as? Int,delay>=0,delay<=2000,timeout>0,timeout<=2000 else {try fail("INVALID_INPUT")}
         let start=ProcessInfo.processInfo.systemUptime
         try awaitWriteReadback(target,Double(timeout)/1000) {
-            ProcessInfo.processInfo.systemUptime-start>=Double(delay)/1000 ? target : expectedRaw
+            let ready=ProcessInfo.processInfo.systemUptime-start>=Double(delay)/1000
+            if input["transientAttachment"] as? Bool == true && !ready {try fail("UNSUPPORTED_NOTE")}
+            return ready ? target : expectedRaw
         }
         return ["ok":true,"value":["matched":true]]
     }
@@ -199,19 +226,27 @@ func run() throws -> [String:Any] {
     guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Notes").first else {try fail("EDITOR_UNAVAILABLE")}
     let root=AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(root,1)
-    let windows=get(root,kAXWindowsAttribute) as? [AXUIElement] ?? []
-    guard windows.count<=16 else {try fail("EDITOR_UNAVAILABLE")}
-    let editors=windows.compactMap{editor($0)}
-    guard !editors.isEmpty else {try fail("EDITOR_UNAVAILABLE")}
     func trim(_ s:String)->String{s.trimmingCharacters(in:.newlines)}
-    // Notes can put a utility/empty window first. Select only the unique editor
-    // matching the ID-bound scripting snapshot; never guess by window order.
-    let matching=editors.filter{candidate in
-        guard let text=try? value(candidate) else {return false}
-        return trim(text)==trim(expectedRaw)
-    }
-    guard matching.count==1,let e=matching.first else {try fail("CONFLICT")}
-    var current=try read(e)
+    // Showing an ID-bound note is asynchronous too. Wait only for selection,
+    // before any write is dispatched; ambiguity remains a hard conflict.
+    let editorDeadline=ProcessInfo.processInfo.systemUptime+2
+    var selected:AXUIElement?
+    var hadEditor=false
+    repeat {
+        let windows=get(root,kAXWindowsAttribute) as? [AXUIElement] ?? []
+        guard windows.count<=16 else {try fail("EDITOR_UNAVAILABLE")}
+        let editors=windows.compactMap{editor($0)}
+        hadEditor = hadEditor || !editors.isEmpty
+        let matching=editors.filter{candidate in
+            guard let text=try? value(candidate) else {return false}
+            return trim(text)==trim(expectedRaw)
+        }
+        guard matching.count<=1 else {try fail("CONFLICT")}
+        if let candidate=matching.first {selected=candidate;break}
+        Thread.sleep(forTimeInterval:0.03)
+    } while ProcessInfo.processInfo.systemUptime<editorDeadline
+    guard let e=selected else {try fail(hadEditor ? "CONFLICT" : "EDITOR_UNAVAILABLE")}
+    var current=try readReady(e)
     if command != "read" {
         app.activate();Thread.sleep(forTimeInterval:0.1);try front(app)
         if command == "append" || command == "replace" || command == "formatCreated" {
@@ -237,10 +272,10 @@ func run() throws -> [String:Any] {
             let tokens=prospective.matches(in:target,range:NSRange(location:0,length:(target as NSString).length)).map{(target as NSString).substring(with:$0.range)}
             guard Set(tokens+(input["preserveTags"] as? [String] ?? [])).count<=32 else {try fail("CAPACITY_EXCEEDED")}
             if trim(current.0) != trim(target) {
-                try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length))
-                try paste(desired,app,e,target)
+                try select(e,NSRange(location:command == "append" ? raw.length : 0,length:command == "append" ? 0 : raw.length),raw as String)
+                try paste(desired,app,e,target,raw as String)
             }
-            current=try read(e)
+            current=try readReady(e)
             guard trim(current.0)==trim(target) else {try fail("WRITE_RESULT_UNKNOWN")}
         } else if command != "ensureTags" {try fail("INVALID_INPUT")}
         let pattern="(?<![\\p{L}\\p{N}_])#(?:O|KR)[0-9]+(?![\\p{L}\\p{N}_-])"
@@ -258,26 +293,39 @@ func run() throws -> [String:Any] {
             if r.temporaryDelimiter {
                 // Prose-only tags can be followed solely by punctuation. Use a
                 // temporary space, then remove only that verified inserted byte.
-                try select(e,NSRange(location:after,length:0))
-                key(49);Thread.sleep(forTimeInterval:0.08)
+                try select(e,NSRange(location:after,length:0),raw as String)
+                nativePhase="tag-insert"
+                key(49)
                 let originalText=current.0
                 let inserted=raw.replacingCharacters(in:r.range,with:"\u{fffc} ")
-                guard try value(e)==inserted else {try fail("WRITE_RESULT_UNKNOWN")}
-                try select(e,NSRange(location:r.range.location+1,length:1))
-                key(51);Thread.sleep(forTimeInterval:0.08)
-                guard try read(e).0==originalText else {try fail("WRITE_RESULT_UNKNOWN")}
+                try awaitWriteReadback("ready",2) {try value(e)==inserted ? "ready" : ""}
+                try select(e,NSRange(location:r.range.location+1,length:1),inserted)
+                nativePhase="tag-delete"
+                let insertedRaw=try value(e)
+                key(51)
+                try awaitWriteReadback(originalText,2) {
+                    if try value(e)==insertedRaw {return "\u{0}"}
+                    return try read(e).0
+                }
             } else {
                 let delimiter=raw.substring(with:NSRange(location:after,length:1))
-                try select(e,NSRange(location:after,length:1))
-                key(delimiter == " " ? 49 : 36);Thread.sleep(forTimeInterval:0.08)
+                try select(e,NSRange(location:after,length:1),raw as String)
+                key(delimiter == " " ? 49 : 36)
             }
-            current=try read(e)
-            guard current.1.contains(tag) else {try fail("TAG_WRITE_FAILED")}
+            nativePhase="tag-readback"
+            do {try awaitWriteReadback(tag,2) {
+                // Expanding existing attachments changes selection. Wait for
+                // this key to consume its original range before inspecting them.
+                if try value(e)==raw as String {return ""}
+                return try read(e).1.contains(tag) ? tag : ""
+            }}
+            catch let failure as Failure where failure.code == "WRITE_RESULT_UNKNOWN" {try fail("TAG_WRITE_FAILED")}
+            current=try readReady(e)
         }
     }
-    if command != "read" {try formatHeadings(e,root,app)}
+    if command != "read" {nativePhase="heading-format";try formatHeadings(e,root,app)}
     let complete=headingRanges(try value(e)).allSatisfy{range,names in names.contains(headingStyle(e,range) ?? "")}
     return ["ok":true,"value":["plaintext":current.0,"nativeTags":current.1,"headingsComplete":complete]]
 }
 do {let result=try run();let data=try JSONSerialization.data(withJSONObject:result,options:.sortedKeys);print(String(data:data,encoding:.utf8)!)}
-catch {let code=(error as? Failure)?.code ?? "APPLE_RESULT_UNKNOWN";print("{\"ok\":false,\"code\":\"\(code)\"}")}
+catch {let code=(error as? Failure)?.code ?? "APPLE_RESULT_UNKNOWN";print("{\"ok\":false,\"code\":\"\(code)\",\"nativePhase\":\"\(nativePhase)\"}")}

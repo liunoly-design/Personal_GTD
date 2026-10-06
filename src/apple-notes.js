@@ -32,7 +32,9 @@ function ui(request, timeoutMs) {
         const response = JSON.parse(output);
         if (!response.ok) {
           const allowed = /^(CONFLICT|PERMISSION_DENIED|ACCESSIBILITY_DENIED|UNSUPPORTED_NOTE|CAPACITY_EXCEEDED|INVALID_INPUT|EDITOR_UNAVAILABLE|UI_FOCUS_CHANGED|AX_SELECTION_FAILED|HEADING_FORMAT_FAILED|TAG_READ_FAILED|TAG_WRITE_FAILED|TAG_DELIMITER_REQUIRED|WRITE_RESULT_UNKNOWN)$/;
-          throw new Error(allowed.test(response.code) ? response.code : 'APPLE_RESULT_UNKNOWN');
+          const error = new Error(allowed.test(response.code) ? response.code : 'APPLE_RESULT_UNKNOWN');
+          if (['read','paste-readback','tag-insert','tag-delete','tag-readback','heading-format'].includes(response.nativePhase)) error.nativePhase = response.nativePhase;
+          throw error;
         }
         resolve(response.value);
       } catch (error) { reject(error instanceof SyntaxError ? new Error('APPLE_RESULT_UNKNOWN') : error); }

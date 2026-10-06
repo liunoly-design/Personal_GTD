@@ -77,6 +77,7 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
       catch (cause) {
         const error = new Error(cause instanceof Error ? cause.message : 'NOTES_UNAVAILABLE');
         error.operation = request.command;
+        error.nativePhase = cause?.nativePhase;
         throw error;
       }
     };

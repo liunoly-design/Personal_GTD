@@ -241,8 +241,10 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
             : code === 'CAPACITY_EXCEEDED' || code === 'BUDGET_EXHAUSTED' ? '记录已达到本版容量上限。'
             : '请保留原消息，核对备忘录后再继续。';
           const operation = ['bind', 'find', 'create', 'read', 'append', 'replace'].includes(error.operation) ? error.operation : 'unknown';
-          store.set('okr-error:' + hash([event.senderId, event.conversationId, event.id]), { code, operation, at: now?.() ?? new Date().toISOString() });
-          result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。原因：${code}（${operation}）。${explanation}` };
+          const phaseNames = {read:'标签附件读取', 'paste-readback':'粘贴正文核对', 'tag-insert':'标签激活核对', 'tag-delete':'临时分隔删除核对', 'tag-readback':'标签转换核对', 'heading-format':'标题格式核对'};
+          const nativePhase = Object.hasOwn(phaseNames,error.nativePhase) ? error.nativePhase : undefined;
+          store.set('okr-error:' + hash([event.senderId, event.conversationId, event.id]), { code, operation, ...(nativePhase ? {nativePhase} : {}), at: now?.() ?? new Date().toISOString() });
+          result = { status: 'okr_error', code, operation, receipt: `OKR 记录未确认完成。原因：${code}（${operation}）。${nativePhase ? '执行阶段：'+phaseNames[nativePhase]+'。' : ''}${explanation}` };
         }
       }
     } else if ((entry?.module === 'gtd' || !entry) && !taskQuery(command) && (selectionCandidate(command || event.text)

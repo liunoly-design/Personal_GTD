@@ -126,8 +126,8 @@ test('OKR单模块七轮讨论、暂停重启、原身份草案确认和旧入�
 test('原生标签写入失败说明正文和格式核对步骤，不诱导重新分析',async t=>{
   const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
   const dir=mkdtempSync(join(tmpdir(),'okr-tag-receipt-'));let fail=false;
-  const f=standaloneFixture(dir,{bridgeFailure:r=>{if(fail&&r.command==='replace')throw new Error('TAG_WRITE_FAILED');}});
+  const f=standaloneFixture(dir,{bridgeFailure:r=>{if(fail&&r.command==='replace'){const e=new Error('TAG_WRITE_FAILED');e.nativePhase='tag-readback';throw e;}}});
   t.after(async()=>{await f.close();rmSync(dir,{recursive:true,force:true});});
   await f.send('om_open','小婕 okr 讨论');const parent=f.sent.at(-1).message_id;
-  fail=true;const r=await f.send('om_answer','合成回答',{parent});assert.equal(r.code,'TAG_WRITE_FAILED');assert.match(r.receipt,/原生标签/);assert.match(r.receipt,/小婕 okr 续接/);assert.match(r.receipt,/不要.*重试分析/);
+  fail=true;const r=await f.send('om_answer','合成回答',{parent});assert.equal(r.code,'TAG_WRITE_FAILED');assert.match(r.receipt,/标签转换核对/);assert.match(r.receipt,/原生标签/);assert.match(r.receipt,/小婕 okr 续接/);assert.match(r.receipt,/不要.*重试分析/);
 });
