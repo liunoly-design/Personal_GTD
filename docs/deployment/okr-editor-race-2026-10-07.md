@@ -9,3 +9,5 @@
 公开延迟附件元数据回归、可信飞书阶段回执回归先红后绿。完整264项、npm run check、git diff --check通过。真实持续回归脚本：deploy/verify-notes-editing.js，必须提供私有runtime配置、结果目录及--allow-notes-writes，新建合成笔记且保存真实ID，五轮走正式callNotes替换/读回路径，每轮正文/标签/标题完整。该脚本不进普通模拟测试，不读写用户业务目标、不调模型、不发飞书消息。五轮正式验收已执行通过；试验合成笔记保留为可核对证据，私人ID及数据库不入Git。
 
 原绑定讨论稿已重新打开，正文与pending投影精确一致、原生标签和标题完整；未删除pending，用户下一条续接走正常核对。用户新业务回答及在线模型质量是单独验收边界。单agent顺序规范/需求审查：保留原回答、绑定、预算及unknown保护，任何等待都不重发写入，只白名单阶段透出回执，无无界重试、自动定稿或无授权业务消息。
+
+f956a8a已导出okr-editor-race-20261007-f956a8a并通过插件隔离校验。部署前备份主机/runtime、5个状态库及usage，仅更新PGTD加载路径，保留原runtime字节及并行Wiki更新；四个变更源码与受测工作区相同。网关restart为restarted，PID20323 running、RPC ok=true，plugin loaded/source匹配新快照。本地提交，未推送。部署后journal哈希仍通过，pending保留，已请用户发送新“小婕 okr 续接”作正常核对，不能把部署健康或合成真实五轮当作新业务消息验收。
