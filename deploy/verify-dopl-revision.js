@@ -19,11 +19,11 @@ try{
  const ids=await callNotes({command:'bind',account:values.account,folder:values.folder});
  const scope={...ids,noteId:values['note-id']},before=await callNotes({...scope,command:'read'});
  if(before.id!==scope.noteId||before.plaintext.split(/\r?\n/u).find(l=>l.trim())?.trim()!==`${year}-DOPL`)throw new Error('LOCATION_NOT_UNIQUE');
- if(before.plaintext.split(/\r?\n/u).some(line=>line.trim()===heading))throw new Error('DAY_ALREADY_RECORDED');
+ if(before.plaintext.split(/\r?\n/u).some(line=>line.trim()===heading||line.trim()===`心得日期：${values.date}`))throw new Error('DAY_ALREADY_RECORDED');
  const suffix=randomUUID().replaceAll('-',''),sentAt=values['direct-record']?values.date+'T12:00:00+08:00':new Date().toISOString();
  writeFileSync(join(directory,'before-'+suffix+'.json'),JSON.stringify(before),{mode:0o600});
- let writes=0,bridgeCalls=0,verifiedRead;
- const bridge=async(r,options)=>{bridgeCalls++;if(['create','append','replace'].includes(r.command))writes++;const value=await callNotes(r,options);if(r.command==='read')verifiedRead=value;return value;};
+ let writes=0,bridgeCalls=0,verifiedRead;const featureWrites=[];
+ const bridge=async(r,options)=>{bridgeCalls++;if(['create','append','replace'].includes(r.command)){writes++;featureWrites.push(r.command);}const value=await callNotes(r,options);if(r.command==='read')verifiedRead=value;return value;};
  f=doplFixture(directory,{config:{review:{account:values.account,folder:values.folder,year,noteId:scope.noteId,allowCreate:false,writeEnabled:true}},bridge});
  const send=(name,text,extra={})=>f.send('om_revision_probe_'+suffix+'_'+name,text,{sentAt,...extra});
  const requireStatus=(r,status)=>{if(r.status!==status)throw new Error(r.code??'UNEXPECTED_STATUS');return r;};
@@ -33,10 +33,10 @@ try{
   for(const [i,answer] of ['合成直接记录原文：先核对事实。','合成直接记录补充：再决定行动。'].entries()){
    const question=requireStatus(await send('direct_question_'+i,'小婕 review 记录心得'),'review_question');
    if(question.receipt.includes('合成直接记录原文'))throw new Error('OLD_CONTENT_EXPOSED');
-   const parent=f.sent.at(-1).message_id;await f.restart();
-   const result=requireStatus(await send('direct_answer_'+i,answer,{parent}),'review_recorded');
+   const parent=f.sent.at(-1).message_id,answerAt=values.date+(i?'T12:00:05+08:00':'T12:00:00+08:00');await f.restart();
+   const result=requireStatus(await send('direct_answer_'+i,answer,{parent,sentAt:answerAt}),'review_recorded');
    if(result.receipt.includes('确认保存')||(i&&result.receipt.includes('合成直接记录原文')))throw new Error('UNEXPECTED_RECEIPT');
-   const count=writes;await f.restart();requireStatus(await send('direct_answer_'+i,answer,{parent}),'review_recorded');if(writes!==count)throw new Error('DUPLICATE_WRITE');
+   const count=writes;await f.restart();requireStatus(await send('direct_answer_'+i,answer,{parent,sentAt:answerAt}),'review_recorded');if(writes!==count)throw new Error('DUPLICATE_WRITE');
   }
  }else{
  requireStatus(await send('open','小婕 review 补记 '+values.date),'review_question');requireStatus(await send('answer','合成验收原文：先核对事实。',{parent:f.sent.at(-1).message_id}),'review_draft');requireStatus(await send('save','确认保存',{parent:f.sent.at(-1).message_id}),'review_saved');
@@ -45,16 +45,19 @@ try{
   const parent=f.sent.at(-1).message_id;await f.restart();requireStatus(await send('save_'+i,'确认保存',{parent}),'review_revised');const count=writes;await f.restart();requireStatus(await send('save_'+i,'确认保存',{parent}),'review_revised');if(writes!==count)throw new Error('DUPLICATE_WRITE');
  }
  }
- const historyVersions=values['direct-record']?1:2;
+ const historyVersions=values['direct-record']?0:2;
  const after=await callNotes({...scope,command:'read'});
  if(after.body!==verifiedRead?.body)throw new Error('CONFLICT');
- if(after.plaintext.split(/\r?\n/u).filter(l=>l.trim()===heading).length!==1||after.plaintext.split(`修订历史 ${values.date}`).length-1!==historyVersions)throw new Error('READBACK_FAILED');
+ if(values['direct-record']){
+  if(!after.plaintext.startsWith(canonical(before.plaintext)+'\n')||featureWrites.join(',')!=='append,append'||after.plaintext.split(`心得日期：${values.date}`).length-1!==2)throw new Error('APPEND_READBACK_FAILED');
+  for(const time of ['12:00:00','12:00:05'])if(!after.plaintext.includes(`记录时间：${values.date} ${time} +08:00（Asia/Shanghai）`))throw new Error('TIMESTAMP_READBACK_FAILED');
+ }else if(after.plaintext.split(/\r?\n/u).filter(l=>l.trim()===heading).length!==1||after.plaintext.split(`修订历史 ${values.date}`).length-1!==historyVersions)throw new Error('READBACK_FAILED');
  writeFileSync(join(directory,'after-'+suffix+'.json'),JSON.stringify(after),{mode:0o600});
  // Restore only if the complete current note is still our known result. Unknown
  // failures stop above and leave state/backups for read-only reconciliation.
  await callNotes({...scope,command:'replace',expectedBody:after.body,body:before.body});writes++;
  const restored=await callNotes({...scope,command:'read'});
  if(canonical(restored.plaintext)!==canonical(before.plaintext)||JSON.stringify([...restored.nativeTags].sort())!==JSON.stringify([...before.nativeTags].sort()))throw new Error('CLEANUP_READBACK_FAILED');
- console.log(JSON.stringify({mode:'real-apple-notes',status:'passed',date:values.date,noteId:scope.noteId,activeEntries:1,historyVersions,directRecord:values['direct-record']===true,duplicateWrites:0,writes,bridgeCalls,cleanup:'original-plaintext-and-tags-restored',modelCalls:0,realFeishuSends:0,realFeishuAcceptance:false}));
+ console.log(JSON.stringify({mode:'real-apple-notes',status:'passed',date:values.date,noteId:scope.noteId,activeEntries:values['direct-record']?2:1,featureAppendWrites:featureWrites.filter(c=>c==='append').length,featureReplaceWrites:featureWrites.filter(c=>c==='replace').length,previousContentUnchanged:values['direct-record']?true:undefined,historyVersions,directRecord:values['direct-record']===true,duplicateWrites:0,writes,bridgeCalls,cleanup:'original-plaintext-and-tags-restored',modelCalls:0,realFeishuSends:0,realFeishuAcceptance:false}));
 }catch(error){const code=/^[A-Z_]+$/.test(error.message)?error.message:'PROBE_FAILED';console.error(JSON.stringify({status:'stopped',code,savedState:f?'retained':'not_initialized',nextAction:'核对原ID及私有快照；未知写入先续接只读核对，不自动重写或清理。'}));process.exitCode=1;}
 finally{await f?.close();}

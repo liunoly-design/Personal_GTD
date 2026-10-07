@@ -269,14 +269,14 @@ test('记录心得给引导问题，回复原文直接保存，无草案或二�
  const {f}=fixture(t);await register(f);
  const q=await f.send('om_direct_question','小婕 review 记录心得');assert.equal(q.status,'review_question');assert.match(q.receipt,/值得记住/);assert.match(q.receipt,/学到了什么/);assert.match(q.receipt,/行动/);assert.ok(!f.operations.includes('append'));
  const saved=await f.send('om_direct_answer','直接记录的合成原文。',{parent:f.sent.at(-1).message_id});assert.equal(saved.status,'review_recorded');assert.equal(saved.date,'2026-10-06');assert.equal(saved.modelCalls,0);
- assert.match(f.notes[0].plaintext,/1006-心得\n直接记录的合成原文。\nPGTD-DOPL-ENTRY-/);assert.equal(f.operations.filter(c=>c==='append').length,1);assert.ok(!saved.receipt.includes('确认保存'));
+ assert.match(f.notes[0].plaintext,/心得日期：2026-10-06\n记录时间：2026-10-06 10:00:00 \+08:00（Asia\/Shanghai）\n直接记录的合成原文。\nPGTD-DOPL-RECORD-END-/);assert.equal(f.operations.filter(c=>c==='append').length,1);assert.ok(!saved.receipt.includes('确认保存'));
 });
 
-test('已有当天记录心得只给问题，回答直接追加，回执不展示旧原文且保留一条和历史',async t=>{
+test('已有当天记录心得只给问题，回答追加独立块，旧条目原文只出现一次',async t=>{
  const {f}=fixture(t);await saveOriginal(f);const old='原心得：先核对事实。';
  const q=await f.send('om_direct_existing','小婕 review 记录心得');assert.equal(q.status,'review_question');assert.ok(!q.receipt.includes(old));assert.ok(!q.receipt.includes('替换'));
  const r=await f.send('om_direct_added','这次新增收获。',{parent:f.sent.at(-1).message_id});assert.equal(r.status,'review_recorded');assert.ok(!r.receipt.includes(old));assert.ok(r.receipt.includes('这次新增收获。'));
- assert.match(f.notes[0].plaintext,/1006-心得\n原心得：先核对事实。\n这次新增收获。\nPGTD-DOPL-ENTRY-/);assert.match(f.notes[0].plaintext,/旧心得原文\n原心得：先核对事实。\nPGTD-DOPL-HISTORY-END-/);assert.equal(f.notes[0].plaintext.split('1006-心得').length-1,1);assert.equal(f.operations.filter(c=>c==='replace').length,1);
+ assert.match(f.notes[0].plaintext,/1006-心得\n原心得：先核对事实。\nPGTD-DOPL-ENTRY-/);assert.match(f.notes[0].plaintext,/心得日期：2026-10-06\n记录时间：[^\n]+\n这次新增收获。\nPGTD-DOPL-RECORD-END-/);assert.equal(f.notes[0].plaintext.split(old).length-1,1);assert.equal(f.operations.filter(c=>c==='append').length,2);assert.ok(!f.operations.includes('replace'));
 });
 
 test('直接记录旧问题/错身份/取消不写，跨午夜与重启重投仍只记录一次',async t=>{
@@ -286,19 +286,19 @@ test('直接记录旧问题/错身份/取消不写，跨午夜与重启重投仍
  assert.equal((await f.send('om_direct_wrong','别人的回复',{parent:current,sender:'ou_other'})).status,'not_handled');
  assert.equal((await f.send('om_direct_wrong_chat','别的会话回复',{parent:current,chat:'oc_other'})).status,'not_handled');await f.restart();
  const resumed=await f.send('om_direct_resume','小婕 review 续接');assert.equal(resumed.status,'review_question');assert.equal(resumed.date,'2026-10-06');
- const answer=await f.send('om_direct_once','跨午夜直接原文',{parent:current,sentAt:'2026-10-07T00:01:00+08:00'});assert.equal(answer.status,'review_recorded');assert.equal(answer.date,'2026-10-06');await f.restart();
+ const answer=await f.send('om_direct_once','跨午夜直接原文',{parent:current,sentAt:'2026-10-07T00:01:00+08:00'});assert.equal(answer.status,'review_recorded');assert.equal(answer.date,'2026-10-06');assert.match(f.notes[0].plaintext,/心得日期：2026-10-06\n记录时间：2026-10-07 00:01:00 \+08:00/);await f.restart();
  assert.equal((await f.send('om_direct_once','跨午夜直接原文',{parent:current,sentAt:'2026-10-07T00:01:00+08:00'})).status,'review_recorded');assert.equal(f.operations.filter(c=>c==='append').length,1);
  await f.send('om_direct_cancel_q','小婕 review 记录心得');const cancelled=f.sent.at(-1).message_id;await f.send('om_direct_cancel','取消',{parent:cancelled});
  assert.notEqual((await f.send('om_direct_cancel_answer','取消后回复',{parent:cancelled})).status,'review_recorded');assert.ok(!f.operations.includes('replace'));
 });
 
 test('直接追加未知响应保留原文，续接只读核对，跨会话/新请求不重写',async t=>{
- let lost=false;const {f}=fixture(t,{bridgeFailure:r=>{if(r.command==='replace'&&lost)throw new Error('APPLE_TIMEOUT');}});await saveOriginal(f);await f.send('om_direct_unknown_q','小婕 review 记录心得');const parent=f.sent.at(-1).message_id;lost=true;
+ let lost=false;const {f}=fixture(t,{bridgeFailure:r=>{if(r.command==='append'&&lost)throw new Error('APPLE_TIMEOUT');}});await saveOriginal(f);await f.send('om_direct_unknown_q','小婕 review 记录心得');const parent=f.sent.at(-1).message_id;lost=true;
  const failed=await f.send('om_direct_unknown_answer','直接追加未知合成原文',{parent});assert.equal(failed.code,'APPLE_TIMEOUT');await f.restart();lost=false;
  assert.equal((await f.send('om_direct_other_recover','小婕 review 续接',{sender:'ou_other'})).status,'review_recovery_required');
  assert.equal((await f.send('om_direct_pending_new','小婕 review 记录心得')).status,'review_recovery_required');
  const recovered=await f.send('om_direct_unknown_resume','小婕 review 续接');assert.equal(recovered.status,'review_recorded');assert.ok(recovered.receipt.includes('直接追加未知合成原文'));assert.ok(!recovered.receipt.includes('原心得：先核对事实。'));
- assert.equal((await f.send('om_direct_unknown_answer','直接追加未知合成原文',{parent})).status,'review_recorded');assert.equal(f.operations.filter(c=>c==='replace').length,1);assert.equal(f.notes[0].plaintext.split('直接追加未知合成原文').length-1,1);
+ assert.equal((await f.send('om_direct_unknown_answer','直接追加未知合成原文',{parent})).status,'review_recorded');assert.equal(f.operations.filter(c=>c==='append').length,2);assert.ok(!f.operations.includes('replace'));assert.equal(f.notes[0].plaintext.split('直接追加未知合成原文').length-1,1);
 });
 
 test('直接记录冲突/撤权保留本次原文，空答/保留标记/超限不写入，不覆写旧条目',async t=>{
@@ -307,7 +307,40 @@ test('直接记录冲突/撤权保留本次原文，空答/保留标记/超限�
  f.notes[0].body+='<div>人工追加</div>';f.notes[0].plaintext+='\n人工追加';const before=f.notes[0].plaintext;
  const conflict=await f.send('om_direct_conflict_answer','冲突时的新原文',{parent});assert.equal(conflict.code,'CONFLICT');assert.match(conflict.receipt,/记录心得/);
  const resumed=await f.send('om_direct_conflict_resume','小婕 review 续接');assert.equal(resumed.status,'review_unsaved');assert.ok(resumed.receipt.includes('冲突时的新原文'));assert.equal(f.notes[0].plaintext,before);
- await f.send('om_direct_large_q','小婕 review 记录心得');const large=await f.send('om_direct_large_answer','字'.repeat(3999),{parent:f.sent.at(-1).message_id});assert.equal(large.code,'CAPACITY_EXCEEDED');assert.equal(f.notes[0].plaintext,before);
+ await f.send('om_direct_large_q','小婕 review 记录心得');const large=await f.send('om_direct_large_answer','字'.repeat(4001),{parent:f.sent.at(-1).message_id});assert.notEqual(large.status,'review_recorded');assert.equal(f.notes[0].plaintext,before);
  await f.send('om_direct_revoked_q','小婕 review 记录心得');const revoked=f.sent.at(-1).message_id;f.config.review.writeEnabled=false;await f.restart();
  assert.equal((await f.send('om_direct_revoked_answer','撤权后的原文',{parent:revoked})).code,'PERMISSION_DENIED');assert.equal((await f.send('om_direct_revoked_resume','小婕 review 续接')).status,'review_unsaved');assert.ok(!f.operations.includes('replace'));
+});
+
+test('每次记录独立追加带回复时间的块，旧正文HTML及原文保持原样',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);const before={...f.notes[0]};
+ for(const [i,answer,sentAt] of [[1,'第一条\n<原文>&保持','2026-10-06T02:03:04Z'],[2,'第二条独立记录','2026-10-06T10:05:06+08:00']]){
+  await f.send('om_append_q_'+i,'小婕 review 记录心得');const parent=f.sent.at(-1).message_id;
+  assert.equal((await f.send('om_append_a_'+i,answer,{parent,sentAt})).status,'review_recorded');
+ }
+ assert.ok(f.notes[0].body.startsWith(before.body));assert.ok(f.notes[0].plaintext.startsWith(before.plaintext+'\n'));
+ assert.match(f.notes[0].plaintext,/心得日期：2026-10-06\n记录时间：2026-10-06 10:03:04 \+08:00（Asia\/Shanghai）\n第一条\n<原文>&保持/);
+ assert.match(f.notes[0].plaintext,/心得日期：2026-10-06\n记录时间：2026-10-06 10:05:06 \+08:00（Asia\/Shanghai）\n第二条独立记录/);
+ assert.equal(f.operations.filter(c=>c==='append').length,3);assert.ok(!f.operations.includes('replace'));
+ assert.equal(f.notes[0].plaintext.split('原心得：先核对事实。').length-1,1);
+});
+
+test('同秒两条原文各可4000字，独立追加不受旧条目累计长度或手工边界影响',async t=>{
+ const {f}=fixture(t);await register(f);f.notes[0].body+='<div>1006-心得</div><div>手工旧心得，无结束标记</div>';f.notes[0].plaintext+='\n1006-心得\n手工旧心得，无结束标记';const before={...f.notes[0]};
+ for(const i of [1,2]){await f.send('om_same_second_q_'+i,'小婕 review 记录心得');assert.equal((await f.send('om_same_second_a_'+i,'字'.repeat(3999)+i,{parent:f.sent.at(-1).message_id})).status,'review_recorded');}
+ assert.ok(f.notes[0].body.startsWith(before.body));assert.equal(f.notes[0].plaintext.split('记录时间：2026-10-06 10:00:00 +08:00').length-1,2);assert.equal(f.operations.filter(c=>c==='append').length,2);assert.ok(!f.operations.includes('replace'));
+ const legacy=await f.send('om_read_legacy','小婕 review 每日心得');assert.equal(legacy.status,'review_existing');assert.ok(legacy.receipt.includes('手工旧心得'));assert.ok(!legacy.receipt.includes('字'.repeat(10)));
+});
+
+test('直接追加写前超时未落盘，重启续接保留未知状态并拒绝自动重放',async t=>{
+ let stop=false;const {f}=fixture(t,{beforeBridge:r=>{if(stop&&r.command==='append')throw new Error('APPLE_TIMEOUT');}});await register(f);const before=f.notes[0].plaintext;
+ await f.send('om_append_timeout_q','小婕 review 记录心得');stop=true;assert.equal((await f.send('om_append_timeout_a','写前超时原文',{parent:f.sent.at(-1).message_id})).code,'APPLE_TIMEOUT');await f.restart();stop=false;
+ assert.equal((await f.send('om_append_timeout_resume','小婕 review 续接')).code,'WRITE_RESULT_UNKNOWN');assert.equal((await f.send('om_append_timeout_new','小婕 review 记录心得')).status,'review_recovery_required');assert.equal(f.notes[0].plaintext,before);assert.equal(f.operations.filter(c=>c==='append').length,1);assert.ok(!f.operations.includes('replace'));
+});
+
+test('独立追加仍遵守年度容量，失败保留本次原文且旧正文不变',async t=>{
+ const {f}=fixture(t);await register(f);f.notes[0].body+='<div>'+('旧'.repeat(63000))+'</div>';f.notes[0].plaintext+='\n'+('旧'.repeat(63000));const before={...f.notes[0]};
+ await f.send('om_append_capacity_q','小婕 review 记录心得');const answer='新'.repeat(4000);
+ const result=await f.send('om_append_capacity_a',answer,{parent:f.sent.at(-1).message_id});assert.equal(result.code,'CAPACITY_EXCEEDED');assert.deepEqual(f.notes[0],before);assert.ok(!f.operations.includes('append'));
+ const progress=await f.send('om_append_capacity_resume','小婕 review 续接');assert.equal(progress.status,'review_unsaved');assert.ok(progress.receipt.includes(answer));
 });

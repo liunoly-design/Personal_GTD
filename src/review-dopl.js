@@ -71,7 +71,7 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
     if(indices.length>1)throw new Error('LOCATION_NOT_UNIQUE');
     if(!indices.length)return null;
     const start=indices[0];
-    let end=lines.findIndex((line,j)=>j>start&&(/^[0-9]{4}-心得$/u.test(line.trim())||/^PGTD-DOPL-(?:ENTRY|HISTORY)-/u.test(line.trim())));
+    let end=lines.findIndex((line,j)=>j>start&&(/^[0-9]{4}-心得$/u.test(line.trim())||/^PGTD-DOPL-(?:ENTRY|HISTORY|RECORD)-/u.test(line.trim())));
     if(end<0)end=lines.length;
     return {heading,text:lines.slice(start+1,end).join('\n'),start,end,managed:/^PGTD-DOPL-ENTRY-[0-9a-f-]{36}$/u.test(lines[end]?.trim()??'')};
   };
@@ -82,20 +82,21 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
   };
   async function saveEntry(draft,n){
       const year=Number(draft.date.slice(0,4));
-      const marker='PGTD-DOPL-ENTRY-'+draft.version;
-      const addition=`<div>${draft.heading}</div><div>${html(draft.answer)}</div><div>${marker}</div>`;
-      let expectedPlaintext=canonical(n.plaintext)+'\n'+draft.heading+'\n'+draft.answer+'\n'+marker,body;
-      if(draft.mode){
+      const marker='PGTD-DOPL-'+(draft.quick?'RECORD-':'ENTRY-')+draft.version;
+      const block=draft.quick?`${marker}\n────────\n心得日期：${draft.date}\n记录时间：${draft.recordedAt}\n${draft.answer}\nPGTD-DOPL-RECORD-END-${draft.version}`:`${draft.heading}\n${draft.answer}\n${marker}`;
+      const addition=draft.quick?`<div>${html(block)}</div>`:`<div>${draft.heading}</div><div>${html(draft.answer)}</div><div>${marker}</div>`;
+      let expectedPlaintext=canonical(n.plaintext)+'\n'+block,body;
+      if(draft.mode&&!draft.quick){
         const previous=existing(n,draft.date);if(!previous?.managed)throw new Error('UNSUPPORTED_ENTRY');
         const lines=n.plaintext.split(/\r?\n/u);
         lines.splice(previous.start,previous.end-previous.start+1,draft.heading,draft.answer,marker);
         lines.push('PGTD-DOPL-HISTORY-'+draft.version,`修订历史 ${draft.date}（${draft.mode}）`,'旧心得原文',previous.text,'PGTD-DOPL-HISTORY-END-'+draft.version);
         expectedPlaintext=canonical(lines.join('\n'));body=`<div>${html(expectedPlaintext)}</div>`;
-      }else {const dup=duplicate(n,draft.date);if(dup)return finish(dup);}
+      }else if(!draft.quick){const dup=duplicate(n,draft.date);if(dup)return finish(dup);}
       if((body??(n.body+addition)).length>131072||Array.from(expectedPlaintext).length>65536)throw new Error('CAPACITY_EXCEEDED');
-      const result={status:draft.quick?'review_recorded':draft.mode?'review_revised':'review_saved',date:draft.date,noteId:n.id,method,modelCalls:0,receipt:draft.quick?`已记录${draft.date}心得：${config.account}/${config.folder}/${year}-DOPL\n本次新增：\n${draft.submittedAnswer}\n${draft.mode?'已追加到当天心得，旧原文与历史保留。':'已新增当天心得。'}\n笔记ID：${n.id}；已读回核验。`:`已${draft.mode?'修订':'保存'}${draft.date}每日心得：${config.account}/${config.folder}/${year}-DOPL\n${draft.heading}\n${draft.answer}\n笔记ID：${n.id}；原文方法v1，已读回核验，零模型调用。${draft.mode?'旧原文已保留在年度笔记修订历史。':''}`};
+      const result={status:draft.quick?'review_recorded':draft.mode?'review_revised':'review_saved',date:draft.date,noteId:n.id,method,modelCalls:0,receipt:draft.quick?`已记录${draft.date}心得：${config.account}/${config.folder}/${year}-DOPL\n本次新增：\n${draft.submittedAnswer}\n记录时间：${draft.recordedAt}\n已在年度笔记末尾追加独立记录，之前内容保留。\n笔记ID：${n.id}；已读回核验。`:`已${draft.mode?'修订':'保存'}${draft.date}每日心得：${config.account}/${config.folder}/${year}-DOPL\n${draft.heading}\n${draft.answer}\n笔记ID：${n.id}；原文方法v1，已读回核验，零模型调用。${draft.mode?'旧原文已保留在年度笔记修订历史。':''}`};
       store.set('pending',{key,fingerprint,sessionKey,year:year,result,expectedPlaintext});
-      await call({...scope(year),noteId:n.id,expectedBody:n.body,...(draft.mode?{command:'replace',body}:{command:'append',addition})});
+      await call({...scope(year),noteId:n.id,expectedBody:n.body,...(body?{command:'replace',body}:{command:'append',addition})});
       const after=await read(year);if(canonical(after.plaintext)!==canonical(expectedPlaintext))throw new Error('READBACK_FAILED');
       store.transaction(()=>{store.set('pending',null);store.set(sessionKey,null);});return finish(result);
   }
@@ -153,7 +154,7 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
       const year=Number(targetDate.slice(0,4));
       if(year!==config.year&&!annualNotes[year])return finish({status:'review_year_unbound',receipt:`${targetDate}年度${year}-DOPL未绑定；请维护者明确配置该年度现有笔记的真实ID，未新建或写入。`});
       const n=await read(year);if(text==='记录心得'){
-        const version=randomUUID(),result={status:'review_question',date:targetDate,reviewLink:{kind:'question',version},receipt:`${targetDate}记录心得，任选一个问题回答即可：\n1. 今天哪件事最值得记住？\n2. 你从中学到了什么，或有什么新的感受？\n3. 这对接下来的行动有什么启发？\n回复这条消息直接保存原文；当天已有心得时追加这次内容，保留旧原文。回复“取消”结束。`};
+        const version=randomUUID(),result={status:'review_question',date:targetDate,reviewLink:{kind:'question',version},receipt:`${targetDate}记录心得，任选一个问题回答即可：\n1. 今天哪件事最值得记住？\n2. 你从中学到了什么，或有什么新的感受？\n3. 这对接下来的行动有什么启发？\n回复这条消息直接在年度笔记末尾追加独立记录，标注心得日期和回复时间，保留旧原文。回复“取消”结束。`};
         store.set(sessionKey,{phase:'question',quick:true,version,date:targetDate,noteBody:n.body,result});return finish(result);
       }
       const dup=duplicate(n,targetDate);if(dup)return finish(dup);
@@ -182,10 +183,9 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
         store.set(sessionKey,{...session,phase:'quick-answer',submittedAnswer:event.text,result:progress});
         if(config.writeEnabled!==true)throw new Error('PERMISSION_DENIED');
         const n=await read(sessionYear());if(n.body!==session.noteBody)throw new Error('CONFLICT');
-        const previous=existing(n,session.date);if(previous&&!previous.managed)throw new Error('UNSUPPORTED_ENTRY');
-        const answer=previous?previous.text+'\n'+event.text:event.text;
-        if(Array.from(answer).length>4000)throw new Error('CAPACITY_EXCEEDED');
-        return await saveEntry({date:session.date,heading:session.date.slice(5).replace('-','')+'-心得',answer,submittedAnswer:event.text,version:randomUUID(),mode:previous?'合并':undefined,quick:true},n);
+        const replyTime=Temporal.Instant.from(event.sentAt).toZonedDateTimeISO(timeZone);
+        const recordedAt=`${replyTime.toPlainDate()} ${replyTime.toPlainTime().toString({smallestUnit:'second'})} ${replyTime.offset}（${timeZone}）`;
+        return await saveEntry({date:session.date,answer:event.text,submittedAnswer:event.text,recordedAt,version:randomUUID(),quick:true},n);
       }
       const n=await read(sessionYear());if(n.body!==session.noteBody)throw new Error('CONFLICT');
       if(!session.mode){const dup=duplicate(n,session.date);if(dup)return finish(dup);}
