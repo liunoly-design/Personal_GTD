@@ -63,6 +63,15 @@ export function openOkrSession({ statePath, config, bridge, guide, guideTimeoutM
       const original = store.get('event:' + hash([event.senderId, event.conversationId, source.id]));
       const parentResult = typeof event.retryParentId === 'string' && event.retryParentId.length <= 256
         ? store.get('event:' + hash([event.senderId, event.conversationId, event.retryParentId]))?.result : null;
+      const verifiedFailure = source.action === 'record' && source.senderId === event.senderId
+        && source.conversationId === event.conversationId && typeof source.text === 'string'
+        && source.text.trim() && source.text.length <= 4000
+        && original?.fingerprint === hash(source) && original?.result?.status === 'okr_guidance_failed';
+      if (event.action === 'record' && verifiedFailure && parentResult?.status !== 'okr_guidance_failed') {
+        return finish({ status:'okr_retry_unavailable', receipt:'已找到原回答，但本次回复的回执不是模型分析失败回执；未调用模型。\n原回答：' + source.text.slice(0, 160)
+          + (source.text.length > 160 ? '…' : '')
+          + '\n请找到机器人回复该原回答、以“已保存原回答；未更新草案和当前已确认目标”开头的回执，回复它发送“重试分析”。不要回复编辑窗口错误或本提示。' });
+      }
       if (event.action !== 'record' || source.action !== 'record' || source.senderId !== event.senderId
         || source.conversationId !== event.conversationId || typeof source.text !== 'string' || !source.text.trim()
         || source.text.length > 4000 || original?.fingerprint !== hash(source) || original?.result?.status !== 'okr_guidance_failed'

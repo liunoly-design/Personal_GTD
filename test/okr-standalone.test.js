@@ -131,3 +131,20 @@ test('原生标签写入失败说明正文和格式核对步骤，不诱导重�
   await f.send('om_open','小婕 okr 讨论');const parent=f.sent.at(-1).message_id;
   fail=true;const r=await f.send('om_answer','合成回答',{parent});assert.equal(r.code,'TAG_WRITE_FAILED');assert.match(r.receipt,/标签转换核对/);assert.match(r.receipt,/原生标签/);assert.match(r.receipt,/小婕 okr 续接/);assert.match(r.receipt,/不要.*重试分析/);
 });
+
+test('replying to retry editor error identifies preserved answer without model replay',async t=>{
+  const {standaloneFixture}=await import('../examples/okr-standalone-fixture.js');
+  const dir=mkdtempSync(join(tmpdir(),'okr-retry-editor-'));let unavailable=false;
+  const f=standaloneFixture(dir,{guide:async()=>{throw new Error('MODEL_TIMEOUT');},bridgeFailure:r=>{if(unavailable&&r.command==='read')throw new Error('EDITOR_UNAVAILABLE');}});
+  t.after(async()=>{await f.close();rmSync(dir,{recursive:true,force:true});});
+  await f.send('om_open','小婕 okr 讨论');
+  await f.send('om_fail','合成回答：优先甲再乙',{parent:f.sent.at(-1).message_id});
+  const originalFailure=f.sent.at(-1).message_id;unavailable=true;
+  assert.equal((await f.send('om_retry','重试分析',{parent:originalFailure})).code,'EDITOR_UNAVAILABLE');
+  const editorFailure=f.sent.at(-1).message_id;unavailable=false;const calls=f.guideCalls;
+  const result=await f.send('om_wrong_parent','重试分析',{parent:editorFailure});
+  assert.equal(result.status,'okr_retry_unavailable');
+  assert.match(result.receipt,/已找到原回答/);assert.match(result.receipt,/合成回答：优先甲再乙/);
+  assert.match(result.receipt,/已保存原回答；未更新草案/);
+  assert.equal(f.guideCalls,calls);
+});
