@@ -492,3 +492,15 @@ npm run verify:dopl-revision -- --write-synthetic --account '指定账户' --fol
 验证：`npm run test:dopl`、`npm run demo:dopl-direct`；已授权真实Notes合成验证沿用`verify:dopl-revision -- --write-synthetic --direct-record`，校验两次append、零业务replace、两个时间戳、旧正文及重投，再受控恢复测试数据。用户真实回复需单独验收。[规格](.scratch/f614-dopl/t04-spec.md)。
 
 2026-10-07已部署确切461d976快照，291项测试和真实Notes两次独立追加/不同时间戳/重投验证通过，测试数据已恢复。RPC和飞书连接就绪；实际用户新时间块回复另验收。[部署证据](docs/deployment/f614-t04-2026-10-07.md)。
+
+## Review 注册与心得查询（F612/T01）
+
+`小婕 review 查询注册`（或`注册状态`）查看注册方法、绑定位置、读写权限和待核对写入。`查询今天心得`、`查询昨天心得`、`查询 YYYY-MM-DD 心得`返回原文；`查询近期心得`查询含消息当天的最近7天，可加`第2页`。每页最多3条/4500字，保留独立记录与回复时间；旧格式显示未记录时间。查询零模型、零Notes写入，不影响当前问答；未绑定年度、歧义、权限、空与失败分别报告。
+
+```bash
+npm run test:review-query
+npm run demo:review-query
+npm run verify:review-query -- PRIVATE_RUNTIME PRIVATE_STATE NEW_PRIVATE_DESTINATION
+```
+
+最后一条从已有注册状态生成隔离快照，只读授权Notes，不发送飞书；不要提交私有配置、状态和原文。证据见 [F612验收](docs/deployment/f612-query-2026-10-07.md)。

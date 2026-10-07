@@ -1,11 +1,12 @@
 import { createHash,randomUUID } from 'node:crypto';
 import { Temporal } from '@js-temporal/polyfill';
+import {reviewQuery,doplEntries,queryPage} from './review-query.js';
 import { openOperationStore } from './operation-store.js';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const html=text=>text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll('\n','<br>');
 const canonical=text=>text.replaceAll('\r\n','\n').trim();
 const method={id:'dopl-original',version:1};
-const help=()=>({status:'review_help',receipt:'记录心得：发送“小婕 review 记录心得”，回复引导问题直接追加原文。手动每日心得：先发送“小婕 review 注册 DOPL”并回复“确认注册”；之后发送“小婕 review 每日心得”，回复问题提供原文，再回复当前草案“确认保存”。“续接”核对进度，“取消”结束本次。同日已有记录可关联选择合并或替换，补记请显式指定日期；查询、专题及定时复盘尚未交付。',modelCalls:0});
+const help=()=>({status:'review_help',receipt:'记录心得：发送“小婕 review 记录心得”，回复引导问题直接追加原文。手动每日心得：先发送“小婕 review 注册 DOPL”并回复“确认注册”；之后发送“小婕 review 每日心得”，回复问题提供原文，再回复当前草案“确认保存”。“续接”核对进度，“取消”结束本次。同日已有记录可关联选择合并或替换，补记请显式指定日期；查询注册/查询今天心得/查询昨天心得/查询 YYYY-MM-DD 心得/查询近期心得 第N页可只读查询；专题复盘尚未交付。',modelCalls:0});
 export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'}) {
  config=structuredClone(config);
  if(![config.account,config.folder].every(v=>typeof v==='string'&&v.trim()&&v.length<=200)
@@ -117,6 +118,23 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
     if(!n.plaintext.includes(binding.marker))throw new Error('READBACK_FAILED');return n;
   }
   try{
+    if(['查询注册','注册状态','查看注册'].includes(text)){
+      const registration={registered:Boolean(store.get('registration')),method,location,noteId:store.get('note')?.noteId??config.noteId??null,
+        readEnabled:config.readEnabled!==false,writeEnabled:config.writeEnabled===true,pending:Boolean(store.get('pending'))};
+      return finish({status:'review_registration_status',registration,receipt:`DOPL注册：${registration.registered?'已注册':'未注册'}\n方法：${method.id}/v${method.version}；时区：${timeZone}\n位置：${config.account}/${config.folder}/${config.year}-DOPL\n笔记ID：${registration.noteId??'未绑定'}\n读取：${registration.readEnabled?'允许':'禁用'}；写入：${registration.writeEnabled?'允许':'禁用'}；待核对写入：${registration.pending?'是':'否'}`});
+    }
+    const query=reviewQuery(text,date);
+    if(query){
+      if(query.invalid)return finish({status:'review_query_needs_range',receipt:'查询请明确今天、昨天、YYYY-MM-DD或近期心得（最近7天），可加“第N页”；未读写Notes。'});
+      if(!store.get('registration'))return finish({status:'review_needs_registration',receipt:'DOPL尚未注册，未读取Notes。'});
+      const entries=[],references=[];
+      for(let year=Number(query.start.slice(0,4));year<=Number(query.end.slice(0,4));year++){
+        const n=await read(year);references.push({year,noteId:n.id});entries.push(...doplEntries(n.plaintext,year).map(e=>({...e,noteId:n.id})));
+      }
+      const page=queryPage(entries,query);
+      return finish({status:page.total?'review_query':'review_query_empty',range:query,references,...page,
+        receipt:`心得原文查询：${query.start} 至 ${query.end}\n第${query.page}页 / ${page.pages}页；共${page.total}条（每页最多3条/4500字）\n${page.entries.map((e,i)=>`${i+1}. ${e.date}\n记录时间：${e.recordedAt??'旧格式未记录时间'}\n${e.text}\n笔记ID：${e.noteId}`).join('\n\n')|| (page.total?'该页无记录。':'该范围无心得。')}\n${page.nextPage?'下一页：原查询命令加“第'+page.nextPage+'页”':''}`});
+    }
     const pending=store.get('pending');
     if(pending){
       if(pending.sessionKey!==sessionKey)return finish({status:'review_recovery_required',receipt:'另一个会话有待核对写入，请原用户在原会话发送“小婕 review 续接”；本次未写入。'});
