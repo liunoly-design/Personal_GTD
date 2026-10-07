@@ -490,3 +490,5 @@ npm run verify:dopl-revision -- --write-synthetic --account '指定账户' --fol
 本节覆盖T03的同日一条/合并历史规则；旧记录不自动重排或补造时间戳。心得日期取发起日期，跨午夜回复的记录时间如实显示次日。每次最多4000字，年度容量和未知结果只读核对保护沿用。旧`每日心得`/补记/显式合并替换仍管理原`MMDD-心得`确认流程，不隐式将新的时间块并入旧条目。
 
 验证：`npm run test:dopl`、`npm run demo:dopl-direct`；已授权真实Notes合成验证沿用`verify:dopl-revision -- --write-synthetic --direct-record`，校验两次append、零业务replace、两个时间戳、旧正文及重投，再受控恢复测试数据。用户真实回复需单独验收。[规格](.scratch/f614-dopl/t04-spec.md)。
+
+2026-10-07已部署确切461d976快照，291项测试和真实Notes两次独立追加/不同时间戳/重投验证通过，测试数据已恢复。RPC和飞书连接就绪；实际用户新时间块回复另验收。[部署证据](docs/deployment/f614-t04-2026-10-07.md)。
