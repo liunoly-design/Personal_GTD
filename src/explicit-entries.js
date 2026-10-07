@@ -3,6 +3,9 @@ import { activationLength } from './activation.js';
 
 // Parsing is separate from the trusted event; never rewrite its text or ID.
 export function explicitEntry(text, activation) {
+  if (typeof text === 'string' && /^\s*小婕[\s，,:：]*(?:帮助|命令|查询命令|查看命令|help)[？?。]?\s*$/iu.test(text)) {
+    return { module: 'help', prefix: text.length, instruction: '' };
+  }
   for (const module of ['gtd', 'okr', 'review']) {
     const prefix = activationLength(text, `小婕 ${module}`);
     if (prefix) return { module, prefix, instruction: text.slice(prefix).replace(/^[\s，,:：]+/u, '') };
@@ -45,7 +48,7 @@ export function gtdGuard(instruction) {
 
 export function validateEntryActivation(activation = '小婕 GTD') {
   if (typeof activation !== 'string' || !activation.trim() || activation !== activation.trim()) throw new Error('Invalid activation');
-  for (const module of ['okr', 'review']) {
+  for (const module of ['okr', 'review', '帮助', '命令', '查询命令', '查看命令', 'help']) {
     const canonical = `小婕 ${module}`;
     // Both directions matter: a short custom prefix can swallow a namespace.
     if (activationLength(activation, canonical) || activationLength(canonical, activation)

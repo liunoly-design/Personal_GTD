@@ -344,3 +344,11 @@ test('独立追加仍遵守年度容量，失败保留本次原文且旧正文�
  const result=await f.send('om_append_capacity_a',answer,{parent:f.sent.at(-1).message_id});assert.equal(result.code,'CAPACITY_EXCEEDED');assert.deepEqual(f.notes[0],before);assert.ok(!f.operations.includes('append'));
  const progress=await f.send('om_append_capacity_resume','小婕 review 续接');assert.equal(progress.status,'review_unsaved');assert.ok(progress.receipt.includes(answer));
 });
+
+test('查询命令帮助不改变当前Review问题，回复帮助菜单不冒充问题或保存心得',async t=>{
+ const {f}=fixture(t);await register(f);await f.send('om_help_question','小婕 review 记录心得');const question=f.sent.at(-1).message_id,operations=f.operations.length;
+ const menu=await f.send('om_help_during','小婕 review 帮助');assert.equal(menu.status,'commands_help');assert.equal(f.operations.length,operations);const parent=f.sent.at(-1).message_id;
+ assert.notEqual((await f.send('om_help_reply','把这当作心得',{parent})).status,'review_recorded');assert.equal(f.operations.length,operations);
+ const resumed=await f.send('om_help_resume','小婕 review 续接');assert.equal(resumed.status,'review_question');
+ assert.equal((await f.send('om_help_original_answer','原问题的独立回答',{parent:question})).status,'review_recorded');assert.equal(f.notes[0].plaintext.split('原问题的独立回答').length-1,1);assert.ok(!f.notes[0].plaintext.includes('把这当作心得'));
+});

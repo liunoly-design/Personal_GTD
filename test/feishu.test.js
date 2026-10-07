@@ -428,8 +428,8 @@ test('自定义激活词保留 GTD，默认三个入口并存且启动拒绝跨�
   assert.equal((await dispatch(f, 'om_custom', '记事 买牛奶')).status, 'collected');
   assert.equal((await dispatch(f, 'om_default', '小婕gtd 买苹果')).status, 'collected');
   assert.equal((await dispatch(f, 'om_okr_new', '小婕 okr 讨论')).status, 'okr_unavailable');
-  assert.equal((await dispatch(f, 'om_review_new', '小婕 review')).status, 'review_unavailable');
-  for (const activation of ['小婕 OKR', '小婕okr 讨论', '小婕 review 注册', '小婕']) {
+  assert.equal((await dispatch(f, 'om_review_new', '小婕 review')).status, 'commands_help');
+  for (const activation of ['小婕 OKR', '小婕okr 讨论', '小婕 review 注册', '小婕', '小婕 帮助', '小婕 查询命令', '小婕help']) {
     assert.throws(() => validateFeishuScope({ ...scope, activation }), /activation.*conflict/i, activation);
   }
   const same = fixture(t, { config: { activation: '小婕GTD' } });
@@ -453,15 +453,15 @@ test('三个命名空间边界、空入口和 OKR 否定/查询均不新增业�
   const n = syntheticNotes();
   const f = fixture(t, { config: { okr: { account: 'iCloud', folder: 'Notes' } }, notesBridge: n.bridge });
   for (const [i, text] of ['小婕', '小婕 okrx 讨论', '小婕 reviewable 日复盘', '正文 小婕 okr 讨论',
-    '“小婕 gtd 买牛奶”', '> 小婕 review 日复盘'].entries()) {
+    '“小婕 gtd 买牛奶”', '> 小婕 review 日复盘', '“小婕 帮助”', '小婕 帮助我', '小婕 帮助并删除任务'].entries()) {
     assert.equal((await dispatch(f, 'om_boundary' + i, text)).status, 'not_handled');
   }
   for (const [i, text] of ['小婕 okr', '小婕 OKR：未知动作', '小婕 okr 不要记录这句话',
     '小婕 okr “记录：引用”', '小婕 okr 讨论并删除任务', '小婕 okr 好的'].entries()) {
-    assert.equal((await dispatch(f, 'om_help' + i, text)).status, 'okr_help');
+    assert.equal((await dispatch(f, 'om_help' + i, text)).status, i === 0 ? 'commands_help' : 'okr_help');
   }
   assert.equal((await dispatch(f, 'om_query_unbound', '小婕 okr 看看当前目标')).status, 'okr_query_needs_binding');
-  assert.equal((await dispatch(f, 'om_empty', '小婕GTD')).status, 'needs_instruction');
+  assert.equal((await dispatch(f, 'om_empty', '小婕GTD')).status, 'commands_help');
   assert.equal(n.calls, 0);
   assert.equal(f.calls, 0);
   assert.equal((await f.reminders.listItems()).length, 0);
@@ -637,4 +637,27 @@ test('真实模型适配器的单项输出经可信飞书入口推进KR，原O�
   assert.match(result.receipt, /原O文字必须保持。\n### #KR1 合成可验收结果/);
   assert.equal((await dispatch(f, 'om_http_step_kr', '我想完善当前目标的KR', parent)).status, 'okr_guided');
   assert.equal(requests, 2);
+});
+
+test('空GTD入口返回命令帮助，不要求收集正文，不调用模型或创建任务',async t=>{
+ const f=fixture(t);const text='小婕 gtd';f.messages.set('om_bare_help',message('om_bare_help',text));
+ const r=await f.capture.handle(context('om_bare_help',text));assert.equal(r.status,'commands_help');assert.match(r.receipt,/小婕 gtd 查询任务/);assert.match(r.receipt,/第1项完成/);assert.match(r.receipt,/确认执行/);assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,0);
+});
+
+test('统一帮助和各模块完整菜单可查看停用模块，精确帮助词不进入业务',async t=>{
+ let notesCalls=0;const f=fixture(t,{config:{enabledModules:['gtd']},notesBridge:()=>{notesCalls++;throw new Error('NO_NOTES_FOR_HELP');}});
+ const originalMethods = new Map(Object.entries(f.reminders).filter(([name, value]) => name !== 'close' && typeof value === 'function'));
+ for (const [name] of originalMethods) f.reminders[name] = () => { throw new Error('NO_REMINDERS_FOR_HELP: ' + name); };
+ const examples=['小婕 帮助','小婕 命令','小婕help','小婕 查询命令','小婕 查看命令','小婕 OKR','小婕 review','小婕 gtd 帮助','小婕okr：HELP','小婕 review 查看命令','小婕 gtd okr 帮助'];
+ for(const [i,text] of examples.entries()){const id='om_menu_'+i;f.messages.set(id,message(id,text));const r=await f.capture.handle(context(id,text));assert.equal(r.status,'commands_help',text);assert.ok([...r.receipt].length<=4000);if(r.module==='help'){assert.match(r.receipt,/小婕 gtd 查询任务/);assert.match(r.receipt,/小婕 okr 查询当前目标/);assert.match(r.receipt,/小婕 review 核对自动询问/);}if(r.module==='review'||r.module==='okr')assert.match(r.receipt,/当前未启用/);}
+ for (const [name, method] of originalMethods) f.reminders[name] = method;
+ assert.equal(notesCalls,0);assert.equal(f.calls,0);assert.equal((await f.reminders.listItems()).length,0);
+});
+
+test('帮助仍核对可信来源与重投，未知回执不盲重发，显式收集帮助及普通正文不回归',async t=>{
+ const f=fixture(t);for(const [i,text] of ['小婕 gtd 收集：帮助','小婕 gtd 帮助我买牛奶'].entries()){const id='om_help_literal_'+i;f.messages.set(id,message(id,text));assert.equal((await f.capture.handle(context(id,text))).status,'collected');}assert.equal((await f.reminders.listItems()).length,2);
+ const text='小婕 帮助';f.messages.set('om_help_trust',message('om_help_trust',text));const reads=f.reads;assert.equal((await f.capture.handle({...context('om_help_trust',text),SenderId:'ou_other'})).status,'not_handled');assert.equal(f.reads,reads);
+ const saved=await f.capture.handle(context('om_help_trust',text));assert.equal(saved.status,'commands_help');const sends=f.sent.length,calls=f.calls;await f.restart();assert.equal((await f.capture.handle(context('om_help_trust',text))).status,'commands_help');assert.equal(f.sent.length,sends);assert.equal(f.calls,calls);
+ f.messages.set('om_help_edited',message('om_help_edited',text,{updated:true}));assert.equal((await f.capture.handle(context('om_help_edited',text))).status,'invalid_source');assert.equal((await f.reminders.listItems()).length,2);
+ const lost=fixture(t,{loseReply:true});lost.messages.set('om_help_lost',message('om_help_lost',text));assert.equal((await lost.capture.handle(context('om_help_lost',text))).delivery,'pending');await lost.restart();assert.equal((await lost.capture.handle(context('om_help_lost',text))).delivery,'pending');assert.equal(lost.sent.length,1);assert.equal(lost.calls,0);assert.equal((await lost.reminders.listItems()).length,0);
 });

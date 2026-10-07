@@ -64,3 +64,16 @@ test('宿主admin调度RPC只接受空参数并调用真实运行入口，不允
  await method.fn({params:{now:'fake'},respond:(...r)=>response=r});assert.equal(response[0],false);assert.equal(ticks,0);
  await method.fn({params:{},respond:(...r)=>response=r});assert.equal(response[0],true);assert.equal(ticks,1);assert.deepEqual(response[1],{status:'review_schedule_sent',date:'2026-10-07',modelCalls:0});await h.service.stop();
 });
+
+test('宿主帮助入口确定性接管，保留白名单与发送策略，不进入宿主模型', async () => {
+  const h = host(); let handles = 0;
+  createPlugin({ openRuntime: async () => ({ handle: async () => { handles++; return { status: 'commands_help', delivery: 'sent' }; }, close: async () => {} }) }).register(h.api);
+  for (const text of ['小婕 帮助', '小婕 gtd', '小婕 okr help', '小婕 review']) {
+    assert.equal((await h.hook({ ctx: { ...ctx, rawText: text, CommandAuthorized: false }, sendPolicy: 'allow' }, h.dispatch)).handled, true);
+  }
+  assert.equal(handles, 4); assert.equal(h.replies.length, 0);
+  assert.equal(await h.hook({ ctx: { ...ctx, rawText: '小婕 帮助', SenderId: 'ou_other' }, sendPolicy: 'allow' }, h.dispatch), undefined);
+  assert.equal((await h.hook({ ctx: { ...ctx, rawText: '小婕 帮助' }, sendPolicy: 'deny' }, h.dispatch)).handled, true);
+  assert.equal(handles, 4);
+  await h.service.stop();
+});

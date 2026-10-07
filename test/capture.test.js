@@ -151,7 +151,7 @@ test('多行原文逐字保留，标题保持单行且建议正常生成', async
 test('激活后省略收集动词默认入箱，空内容不创建，分析失败仍保存', async () => {
   for (const config of [{}, { modelIntents: true }]) {
     const { capture, reminders } = setup({ config });
-    for (const text of ['小婕 gtd', '小婕 gtd 收集', '小婕 gtd 收集，']) {
+    for (const text of ['小婕 gtd 收集', '小婕 gtd 收集，']) {
       assert.equal((await capture.handle(event(text))).status, 'needs_instruction');
     }
     assert.equal((await reminders.listItems()).length, 0);
@@ -167,4 +167,19 @@ test('激活后省略收集动词默认入箱，空内容不创建，分析失�
   const result = await capture.handle(event('小婕gtd 买牛奶'));
   assert.equal(result.status, 'collected_analysis_failed');
   assert.equal((await reminders.getItem(result.itemId)).title, '买牛奶');
+});
+
+
+test('本地GTD帮助也返回静态菜单，不调用分析、不访问提醒事项且保留待确认链接', async () => {
+  const { capture, reminders } = setup({ analyze: async () => { throw Error('help must not analyze'); } });
+  await capture.handle(event('小婕 gtd https://example.org/help'));
+  const before = await capture.checkpoint();
+  for (const [i, text] of ['小婕 gtd', '小婕 gtd 帮助', '小婕 帮助'].entries()) {
+    assert.equal(capture.canHandle(event(text)), true);
+    assert.equal((await capture.handle(event(text, { id: 'menu-' + i }))).status, 'commands_help');
+  }
+  assert.deepEqual(await capture.checkpoint(), before);
+  assert.equal((await reminders.listItems()).length, 0);
+  assert.equal((await capture.handle(event('小婕 帮助', { senderId: 'stranger' }))).status, 'forbidden');
+  assert.equal((await capture.handle(event('确认', { id: 'reply', replyTo: 'msg-1' }))).status, 'collected_analysis_failed');
 });

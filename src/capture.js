@@ -4,6 +4,7 @@ import { createReminderSetter } from './actions/set-reminder.js';
 import { createReminderClarifier } from './actions/clarify-reminder.js';
 import { confirmLink } from './actions/confirm-link.js';
 import { explicitEntry, gtdGuard, validateEntryActivation } from './explicit-entries.js';
+import { commandHelp } from './command-help.js';
 import { validInstant, validTimeZone } from './reminder-time.js';
 
 export function createCapture({ reminders, analyze, config = {}, now = () => new Date().toISOString(), checkpoint = {} }) {
@@ -56,7 +57,7 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
     return explicitEntry(event.text, activation)?.module === 'gtd';
   }
   function canHandle(event) {
-    if (activated(event)) return true;
+    if (activated(event) || commandHelp(explicitEntry(event.text, activation), ['gtd'])) return true;
     if (event.replyTo && (pending.has(key(event, event.replyTo)) || reminderRequests.has(key(event, event.replyTo)))) return true;
     return /^(?:\d{1,4}[:\-]|今天|明天|后天|下午|上午|北京时间|\[)/u.test(event.text.trim())
       && [...reminderRequests.values()].some(record => record.event.senderId === event.senderId
@@ -82,6 +83,8 @@ export function createCapture({ reminders, analyze, config = {}, now = () => new
     async handle(event) {
       const rejected = validate(event);
       if (rejected) return rejected;
+      const help = commandHelp(explicitEntry(event.text, activation), ['gtd']);
+      if (help) return help;
       const isActivated = activated(event);
       const timeRequest = !isActivated && event.replyTo && reminderRequests.get(key(event, event.replyTo));
       if (timeRequest) {

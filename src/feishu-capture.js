@@ -1,3 +1,4 @@
+import { commandHelp } from './command-help.js';
 import { completeTask } from './actions/complete-task.js';
 import {maintenanceControl,proposeTaskPlan,executeTaskPlan} from './actions/task-maintenance.js';
 import { selectionCandidate, taskSelection, selectTasks } from './actions/select-tasks.js';
@@ -153,6 +154,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const prefix = entry?.prefix ?? 0;
     const command = entry?.instruction ?? '';
     const legacyInstruction = legacyOkrInstruction(entry);
+    const help = event.type === 'text'
+      ? commandHelp(legacyInstruction !== null ? { ...entry, module: 'okr', instruction: legacyInstruction } : entry, modules) : null;
     const explicitOkr = entry?.module === 'okr' || legacyInstruction !== null;
     const linkedOkr = !prefix && parent?.route === 'okr' && parent.senderId === event.senderId
       && parent.conversationId === event.conversationId;
@@ -189,8 +192,12 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     const refreshReview = isReview && cached?.result.status === 'review_error';
     if (cached && !refreshReview && store.get('completion:'+id)?.state !== 'write_started' && !activePlan) return deliverRouted(event, cached.result);
     store.set('source:' + id, { senderId: event.senderId, conversationId: event.conversationId,
-      rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
+      rootId: prefix ? id : event.replyTo ?? id, textHash: hash(event.text), eventHash: hash(event), event, providerReplyTo: message.parent_id, route: help ? 'help' : isOkr ? 'okr' : entry?.module ?? parent?.route ?? 'gtd' });
     let result;
+    if (help) {
+      store.set('routed-result:' + id, { event, result: help });
+      return deliverRouted(event, help);
+    }
     if (!isReview && !modules.includes(isOkr ? 'okr' : 'gtd')) {
       result = { status: 'module_disabled', receipt: '该模块未启用，请使用已配置的模块入口。' };
       store.set('routed-result:' + id, { event, result });
