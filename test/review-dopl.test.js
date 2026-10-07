@@ -264,3 +264,50 @@ test('原生编辑拒绝保留具体失败码和待核对进度，不把拒绝�
  const {f}=fixture(t,{beforeBridge:r=>{if(r.command==='replace')throw new Error('INVALID_INPUT');}});await saveOriginal(f);const before=f.notes[0].plaintext,d=await revise(f,'替换','native-rejected','合成新稿');
  const r=await f.send('om_native_rejected_confirm','确认保存',{parent:d.parent});assert.equal(r.code,'INVALID_INPUT');assert.match(r.receipt,/待核对/);assert.equal(f.notes[0].plaintext,before);
 });
+
+test('记录心得给引导问题，回复原文直接保存，无草案或二次确认',async t=>{
+ const {f}=fixture(t);await register(f);
+ const q=await f.send('om_direct_question','小婕 review 记录心得');assert.equal(q.status,'review_question');assert.match(q.receipt,/值得记住/);assert.match(q.receipt,/学到了什么/);assert.match(q.receipt,/行动/);assert.ok(!f.operations.includes('append'));
+ const saved=await f.send('om_direct_answer','直接记录的合成原文。',{parent:f.sent.at(-1).message_id});assert.equal(saved.status,'review_recorded');assert.equal(saved.date,'2026-10-06');assert.equal(saved.modelCalls,0);
+ assert.match(f.notes[0].plaintext,/1006-心得\n直接记录的合成原文。\nPGTD-DOPL-ENTRY-/);assert.equal(f.operations.filter(c=>c==='append').length,1);assert.ok(!saved.receipt.includes('确认保存'));
+});
+
+test('已有当天记录心得只给问题，回答直接追加，回执不展示旧原文且保留一条和历史',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);const old='原心得：先核对事实。';
+ const q=await f.send('om_direct_existing','小婕 review 记录心得');assert.equal(q.status,'review_question');assert.ok(!q.receipt.includes(old));assert.ok(!q.receipt.includes('替换'));
+ const r=await f.send('om_direct_added','这次新增收获。',{parent:f.sent.at(-1).message_id});assert.equal(r.status,'review_recorded');assert.ok(!r.receipt.includes(old));assert.ok(r.receipt.includes('这次新增收获。'));
+ assert.match(f.notes[0].plaintext,/1006-心得\n原心得：先核对事实。\n这次新增收获。\nPGTD-DOPL-ENTRY-/);assert.match(f.notes[0].plaintext,/旧心得原文\n原心得：先核对事实。\nPGTD-DOPL-HISTORY-END-/);assert.equal(f.notes[0].plaintext.split('1006-心得').length-1,1);assert.equal(f.operations.filter(c=>c==='replace').length,1);
+});
+
+test('直接记录旧问题/错身份/取消不写，跨午夜与重启重投仍只记录一次',async t=>{
+ const {f}=fixture(t);await register(f);await f.send('om_direct_old_q','小婕 review 记录心得');const old=f.sent.at(-1).message_id;
+ await f.send('om_direct_new_q','小婕 review 记录心得',{sentAt:'2026-10-06T23:59:00+08:00'});const current=f.sent.at(-1).message_id;
+ assert.notEqual((await f.send('om_direct_stale','旧问题回复',{parent:old})).status,'review_recorded');
+ assert.equal((await f.send('om_direct_wrong','别人的回复',{parent:current,sender:'ou_other'})).status,'not_handled');
+ assert.equal((await f.send('om_direct_wrong_chat','别的会话回复',{parent:current,chat:'oc_other'})).status,'not_handled');await f.restart();
+ const resumed=await f.send('om_direct_resume','小婕 review 续接');assert.equal(resumed.status,'review_question');assert.equal(resumed.date,'2026-10-06');
+ const answer=await f.send('om_direct_once','跨午夜直接原文',{parent:current,sentAt:'2026-10-07T00:01:00+08:00'});assert.equal(answer.status,'review_recorded');assert.equal(answer.date,'2026-10-06');await f.restart();
+ assert.equal((await f.send('om_direct_once','跨午夜直接原文',{parent:current,sentAt:'2026-10-07T00:01:00+08:00'})).status,'review_recorded');assert.equal(f.operations.filter(c=>c==='append').length,1);
+ await f.send('om_direct_cancel_q','小婕 review 记录心得');const cancelled=f.sent.at(-1).message_id;await f.send('om_direct_cancel','取消',{parent:cancelled});
+ assert.notEqual((await f.send('om_direct_cancel_answer','取消后回复',{parent:cancelled})).status,'review_recorded');assert.ok(!f.operations.includes('replace'));
+});
+
+test('直接追加未知响应保留原文，续接只读核对，跨会话/新请求不重写',async t=>{
+ let lost=false;const {f}=fixture(t,{bridgeFailure:r=>{if(r.command==='replace'&&lost)throw new Error('APPLE_TIMEOUT');}});await saveOriginal(f);await f.send('om_direct_unknown_q','小婕 review 记录心得');const parent=f.sent.at(-1).message_id;lost=true;
+ const failed=await f.send('om_direct_unknown_answer','直接追加未知合成原文',{parent});assert.equal(failed.code,'APPLE_TIMEOUT');await f.restart();lost=false;
+ assert.equal((await f.send('om_direct_other_recover','小婕 review 续接',{sender:'ou_other'})).status,'review_recovery_required');
+ assert.equal((await f.send('om_direct_pending_new','小婕 review 记录心得')).status,'review_recovery_required');
+ const recovered=await f.send('om_direct_unknown_resume','小婕 review 续接');assert.equal(recovered.status,'review_recorded');assert.ok(recovered.receipt.includes('直接追加未知合成原文'));assert.ok(!recovered.receipt.includes('原心得：先核对事实。'));
+ assert.equal((await f.send('om_direct_unknown_answer','直接追加未知合成原文',{parent})).status,'review_recorded');assert.equal(f.operations.filter(c=>c==='replace').length,1);assert.equal(f.notes[0].plaintext.split('直接追加未知合成原文').length-1,1);
+});
+
+test('直接记录冲突/撤权保留本次原文，空答/保留标记/超限不写入，不覆写旧条目',async t=>{
+ const {f}=fixture(t);await saveOriginal(f);await f.send('om_direct_guard_q','小婕 review 记录心得');const parent=f.sent.at(-1).message_id;
+ for(const [i,answer] of ['  ','1007-心得','原文\nPGTD-DOPL-伪造'].entries())assert.equal((await f.send('om_direct_invalid_'+i,answer,{parent})).status,'review_invalid');
+ f.notes[0].body+='<div>人工追加</div>';f.notes[0].plaintext+='\n人工追加';const before=f.notes[0].plaintext;
+ const conflict=await f.send('om_direct_conflict_answer','冲突时的新原文',{parent});assert.equal(conflict.code,'CONFLICT');assert.match(conflict.receipt,/记录心得/);
+ const resumed=await f.send('om_direct_conflict_resume','小婕 review 续接');assert.equal(resumed.status,'review_unsaved');assert.ok(resumed.receipt.includes('冲突时的新原文'));assert.equal(f.notes[0].plaintext,before);
+ await f.send('om_direct_large_q','小婕 review 记录心得');const large=await f.send('om_direct_large_answer','字'.repeat(3999),{parent:f.sent.at(-1).message_id});assert.equal(large.code,'CAPACITY_EXCEEDED');assert.equal(f.notes[0].plaintext,before);
+ await f.send('om_direct_revoked_q','小婕 review 记录心得');const revoked=f.sent.at(-1).message_id;f.config.review.writeEnabled=false;await f.restart();
+ assert.equal((await f.send('om_direct_revoked_answer','撤权后的原文',{parent:revoked})).code,'PERMISSION_DENIED');assert.equal((await f.send('om_direct_revoked_resume','小婕 review 续接')).status,'review_unsaved');assert.ok(!f.operations.includes('replace'));
+});
