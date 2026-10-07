@@ -49,7 +49,7 @@ export function acceptsFeishuContext(ctx, config) {
     && (activated(ctx.rawText ?? ctx.RawBody, config) || Boolean(ctx.ReplyToIdFull ?? ctx.ReplyToId)
       || selectionCandidate(ctx.rawText ?? ctx.RawBody) || timeCandidate(ctx.rawText ?? ctx.RawBody));
 }
-export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now, notesBridge, okrGuide }) {
+export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze, now, notesBridge, okrGuide, reviewConfig }) {
   config = structuredClone(config);
   validateFeishuScope(config);
   const modules = enabledModules(config);
@@ -109,12 +109,12 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     }
     if (modules.includes('review') && config.review) {
       if (typeof notesBridge !== 'function') throw new Error('Notes bridge required');
-      review = openReviewDopl({statePath:join(stateDir,'review.sqlite'),config:config.review,timeZone:config.timeZone,
+      review = openReviewDopl({statePath:join(stateDir,'review.sqlite'),config:config.review,timeZone:config.timeZone,getConfig:reviewConfig,
         bridge:(request, budgets)=>{options();return notesBridge(request,budgets);}});
     }
     if (modules.includes('gtd')) capture = openDurableCapture({ journalPath: join(stateDir, 'capture.sqlite'), reminders: scopedReminders, receipts, analyze: scopedAnalyze,
       config: { ...config, externalTimeoutMs: 20000 }, now });
-    reviewSchedule=openReviewSchedule({store,config,review,feishu,now,installLink(messageId,run){
+    reviewSchedule=openReviewSchedule({store,config,review,feishu,now,getConfig:reviewConfig,installLink(messageId,run){
       store.set('reply:'+messageId,{senderId:run.senderId,conversationId:run.conversationId,rootId:run.id,route:'review',reviewLink:run.reviewLink});
     }});
     store.set('account', config.accountId);

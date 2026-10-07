@@ -7,7 +7,7 @@ const html=text=>text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll(
 const canonical=text=>text.replaceAll('\r\n','\n').trim();
 const method={id:'dopl-original',version:1};
 const help=()=>({status:'review_help',receipt:'记录心得：发送“小婕 review 记录心得”，回复引导问题直接追加原文。手动每日心得：先发送“小婕 review 注册 DOPL”并回复“确认注册”；之后发送“小婕 review 每日心得”，回复问题提供原文，再回复当前草案“确认保存”。“续接”核对进度，“取消”结束本次。同日已有记录可关联选择合并或替换，补记请显式指定日期；查询注册/查询今天心得/查询昨天心得/查询 YYYY-MM-DD 心得/查询近期心得 第N页可只读查询；专题复盘尚未交付。',modelCalls:0});
-export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'}) {
+export function openReviewDopl({statePath,config,bridge,getConfig,timeZone='Asia/Shanghai'}) {
  config=structuredClone(config);
  if(![config.account,config.folder].every(v=>typeof v==='string'&&v.trim()&&v.length<=200)
    || !Number.isSafeInteger(config.year)||config.year<1970||config.year>9999
@@ -16,6 +16,9 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
  if(typeof annualNotes!=='object'||Array.isArray(annualNotes)||Object.keys(annualNotes).length>20
    ||Object.entries(annualNotes).some(([year,v])=>!/^\d{4}$/u.test(year)||Number(year)<1970||Number(year)>9999||Number(year)===config.year||!v||typeof v.noteId!=='string'||!v.noteId.trim()))throw new Error('INVALID_REVIEW_CONFIG');
  Temporal.Now.zonedDateTimeISO(timeZone);
+ const bindingFields=value=>({account:value.account,folder:value.folder,year:value.year,noteId:value.noteId??null,annualNotes:value.annualNotes??{}});
+ const expectedBinding=hash(bindingFields(config));
+ async function refreshPermissions(){if(getConfig){const current=await getConfig();if(!current||hash(bindingFields(current))!==expectedBinding)throw new Error('BINDING_CHANGED');config.readEnabled=current.readEnabled;config.writeEnabled=current.writeEnabled;}}
  const location={account:config.account,folder:config.folder,year:config.year,noteId:config.noteId??null,timeZone};
  const store=openOperationStore(statePath),token=randomUUID();
  try {store.transaction(()=>{
@@ -38,6 +41,8 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
   store.set(key,{fingerprint});
   let calls=0;const deadline=Date.now()+120000;
   const call=async request=>{
+    await refreshPermissions();
+    if(['append','replace','create','ensureTags'].includes(request.command)&&config.writeEnabled!==true)throw new Error('PERMISSION_DENIED');
     if(config.readEnabled===false)throw new Error('PERMISSION_DENIED');
     if(++calls>8||Date.now()>=deadline)throw new Error('BUDGET_EXHAUSTED');
     const timeoutMs=Math.min(60000,deadline-Date.now());let timer;
@@ -118,6 +123,7 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
     if(!n.plaintext.includes(binding.marker))throw new Error('READBACK_FAILED');return n;
   }
   try{
+    await refreshPermissions();
     if(['查询注册','注册状态','查看注册'].includes(text)){
       const registration={registered:Boolean(store.get('registration')),method,location,noteId:store.get('note')?.noteId??config.noteId??null,
         readEnabled:config.readEnabled!==false,writeEnabled:config.writeEnabled===true,pending:Boolean(store.get('pending'))};

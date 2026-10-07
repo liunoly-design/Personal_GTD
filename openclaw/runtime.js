@@ -39,7 +39,7 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
     }
     if (modules.includes('gtd')) reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, helperPath: runtime.remindersHelperPath, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
-      reminders, feishu, analyze: model?.analyze, notesBridge: callNotes, okrGuide: model?.discussOkr });
+      reminders, feishu, analyze: model?.analyze, notesBridge: callNotes, reviewConfig:async()=>JSON.parse(await readFile(config.runtimeConfigPath,'utf8')).review, okrGuide: model?.discussOkr });
     return { async tickReview(){
       const current=JSON.parse(await readFile(config.runtimeConfigPath,'utf8'));
       if(!enabledModules({...current,...config}).includes('review')||current.review?.readEnabled===false||current.review?.writeEnabled!==true

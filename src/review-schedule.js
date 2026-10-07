@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {Temporal} from '@js-temporal/polyfill';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const validTime=value=>typeof value==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value);
-export function openReviewSchedule({store,config,review,feishu,now=()=>new Date(),installLink}){
+export function openReviewSchedule({store,config,review,feishu,now=()=>new Date(),getConfig,installLink}){
  const seed=config.review?.daily,timeZone=config.timeZone??'Asia/Shanghai';
  if(seed&&(timeZone!=='Asia/Shanghai'||!seed.senderId||!seed.conversationId||!config.allowedSenderIds.includes(seed.senderId)||!config.allowedConversationIds.includes(seed.conversationId)
    ||typeof seed.enabled!=='boolean'||(seed.time!==undefined&&!validTime(seed.time))||(seed.enabled&&!validTime(seed.time))
@@ -10,8 +10,8 @@ export function openReviewSchedule({store,config,review,feishu,now=()=>new Date(
  if(seed&&store.get('review-schedule')?.seed!==hash(seed))store.set('review-schedule',{...seed,seed:hash(seed),version:randomUUID()});
  const clock=()=>Temporal.Instant.from(new Date(now()).toISOString()).toZonedDateTimeISO(timeZone);
  const settings=()=>store.get('review-schedule');
- const authorized=()=>config.enabledModules?.includes('review')&&config.review?.readEnabled!==false&&config.review?.writeEnabled===true
-   &&config.allowedSenderIds.includes(settings()?.senderId)&&config.allowedConversationIds.includes(settings()?.conversationId);
+ const authorized=async()=>{const current=getConfig?await getConfig():config.review;return config.enabledModules?.includes('review')&&current?.readEnabled!==false&&current?.writeEnabled===true
+   &&config.allowedSenderIds.includes(settings()?.senderId)&&config.allowedConversationIds.includes(settings()?.conversationId);};
  const result=(status,extra={})=>({status,modelCalls:0,...extra});
  const unknowns=()=>store.entries('review-run:').map(([,r])=>r).filter(r=>r.state==='unknown');
  const write=run=>store.set('review-run:'+run.date,run);
@@ -35,7 +35,7 @@ export function openReviewSchedule({store,config,review,feishu,now=()=>new Date(
  }
  async function tick(){
   const s=settings();if(!seed||!s||!s.enabled)return result('review_schedule_disabled');
-  if(!authorized())return result('review_schedule_forbidden');
+  if(!await authorized())return result('review_schedule_forbidden');
   const uncertain=unknowns();if(uncertain.length){const run=uncertain[0];return run.reconciliations?result('review_schedule_unknown',{date:run.date}):reconcile(run);}
   const z=clock(),date=z.toPlainDate().toString(),due=Temporal.ZonedDateTime.from(`${date}T${s.time}:00[${timeZone}]`);
   if(Temporal.ZonedDateTime.compare(z,due)<0)return result('review_schedule_not_due');
@@ -60,14 +60,14 @@ export function openReviewSchedule({store,config,review,feishu,now=()=>new Date(
   const s=settings();if(!seed||!s)return result('review_schedule_unconfigured',{receipt:'尚未配置日度自动询问的本人会话，请维护者绑定授权目标；未启用周期。'});
   if(event.senderId!==s.senderId||event.conversationId!==s.conversationId)return result('review_schedule_forbidden',{receipt:'本自动询问仅配置本人会话可管理；未修改。'});
   if(text==='核对自动询问'){
-   if(!authorized())return result('review_schedule_forbidden',{receipt:'Review读取/写入或身份授权已撤销；未核对或重发。'});
+   if(!await authorized())return result('review_schedule_forbidden',{receipt:'Review读取/写入或身份授权已撤销；未核对或重发。'});
    const pending=unknowns();return pending.length?reconcile(pending[0]):result('review_schedule_status',{receipt:'没有待核对的自动询问；未发送。'});
   }
   if(text==='暂停自动询问'){s.enabled=false;s.version=randomUUID();store.set('review-schedule',s);}
   if(text==='恢复自动询问'||text.startsWith('设置自动询问')){
    const time=text==='恢复自动询问'?s.time:text.slice('设置自动询问'.length).trim();
    if(!validTime(time))return result('review_schedule_needs_time',{receipt:'请提供北京时间24小时制HH:mm：小婕 review 设置自动询问 HH:mm；未启用。'});
-   if(!authorized())return result('review_schedule_forbidden',{receipt:'Review权限已撤销，未启用自动询问。'});
+   if(!await authorized())return result('review_schedule_forbidden',{receipt:'Review权限已撤销，未启用自动询问。'});
    s.enabled=true;s.time=time;s.enabledAt=clock().toInstant().toString();s.version=randomUUID();store.set('review-schedule',s);
   }
   return result('review_schedule_status',{schedule:{enabled:s.enabled,time:s.time??null,timeZone,version:s.version,unknown:unknowns().length},

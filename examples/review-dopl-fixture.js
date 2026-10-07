@@ -1,6 +1,6 @@
 import { openFeishuCapture } from '../src/feishu-capture.js';
 // Only external Feishu and Notes are substitutes. Persistence and routing are real.
-export function doplFixture(directory, { bridgeFailure, beforeBridge, config: overrides = {}, bridge: providedBridge, now, sendFailure, beforeSend, getMessageFailure, listMessages } = {}) {
+export function doplFixture(directory, { bridgeFailure, beforeBridge, config: overrides = {}, bridge: providedBridge, now, sendFailure, beforeSend, getMessageFailure, reviewConfig, listMessages } = {}) {
   const config = {accountId:'default',entryAgentId:'xiaojie',allowedSenderIds:['ou_test','ou_other'],allowedConversationIds:['oc_test','oc_other'],
     enabledModules:['review'],timeZone:'Asia/Shanghai',review:{account:'synthetic',folder:'Notes',year:2026,allowCreate:true,writeEnabled:true},...overrides};
   const notes=[], messages=new Map(), sent=[], operations=[];
@@ -24,7 +24,7 @@ export function doplFixture(directory, { bridgeFailure, beforeBridge, config: ov
       const m={...r,sender:{sender_type:'app'},msg_type:'text',create_time:String(Date.parse(now?.()??'2026-10-06T21:00:00+08:00')),body:{content:JSON.stringify({text:input.text})}};
       sent.push({...input,...r});messages.set(r.message_id,m);sendFailure?.(input,r);return r;};
   feishu.listMessages=listMessages??(async()=>({items:[...messages.values()].filter(m=>m.sender?.sender_type==='app'),has_more:false}));
-  const make=()=>openFeishuCapture({stateDir:directory,config,feishu,now,notesBridge:bridge,analyze:()=>{throw new Error('MODEL_MUST_NOT_RUN');}});
+  const make=()=>openFeishuCapture({stateDir:directory,config,feishu,now,reviewConfig,notesBridge:bridge,analyze:()=>{throw new Error('MODEL_MUST_NOT_RUN');}});
   capture=make();
   return {config,notes,operations,sent,messages,bridge,
     async send(id,text,{parent,sender='ou_test',chat='oc_test',sentAt='2026-10-06T10:00:00+08:00'}={}){

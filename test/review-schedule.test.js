@@ -57,3 +57,6 @@ test('未确认时刻保持停用；多义目标、非法配置拒绝且不扩�
 test('注册查询展示日度调度实际暂停状态，不把注册和心得结果混淆',async t=>{
  const {f}=fixture(t);await register(f);await f.send('om_pause_query','小婕 review 暂停自动询问');const r=await f.send('om_registration_query','小婕 review 查询注册');assert.equal(r.registration.schedule.enabled,false);assert.equal(r.registration.schedule.time,'21:00');assert.equal(r.status,'review_registration_status');
 });
+test('已发送自动问题在权限即时撤销后不能沿用旧配置追加，原文可续接且零写',async t=>{
+ let permissions={account:'synthetic',folder:'Notes',year:2026,writeEnabled:true};const {f,setTime}=fixture(t,{reviewConfig:()=>permissions});await register(f);setTime('2026-10-06T21:00:00+08:00');await f.tick();const parent=f.sent.at(-1).message_id;permissions={...permissions,writeEnabled:false};const r=await f.send('om_revoked_live','原文保留',{parent});assert.equal(r.code,'PERMISSION_DENIED');assert.ok(!f.operations.includes('append'));
+});
