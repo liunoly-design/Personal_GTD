@@ -13,7 +13,7 @@ Baseline: b2beaf8a5dc2869bd78d863fc6cf4daf7c847709
 - [x] 精确匹配、显式收集帮助、权限/可信来源、重复/未知回执恢复
 - [x] 帮助插入Review/本地待确认链接不改变原问答
 - [x] 完整检查、模拟演示、顺序规范与需求审查
-- [ ] 部署读回与远端SHA核对
+- [x] 部署读回与远端源码SHA核对
 - [ ] 用户发送新飞书消息看到菜单
 
 ## Verification
@@ -21,3 +21,6 @@ Baseline: b2beaf8a5dc2869bd78d863fc6cf4daf7c847709
 逐项红绿：空GTD、统一帮助、本地GTD菜单。完整测试318项；check、隔离plugin:validate、demo:help及demo:entries通过。统一菜单1036字符（Review-only配置），演示零模型/零业务adapter访问。
 
 顺序审查（单agent，含未提交差异）：规范轴检查可信来源、受保护回执、原始问答及任务限定暂存，无阻塞发现；需求轴逐项核对精确菜单、停用模块、旧入口、问答续接和菜单内容，无阻塞发现。本地入口同步复用静态菜单，核心状态不改变；宿主hook保留白名单与发送策略。真实飞书菜单待新消息验收，旧消息重投沿用旧回执。
+
+
+部署读回见[交付记录](../../../docs/deployment/f601-help-2026-10-07.md)：release对应7799040，插件loaded、RPC ok、飞书ready/probe成功；host仅改PGTD路径，runtime字节、Wiki、Review调度设置与停用宿主任务保持；模型记录96→96。main实现已推送且远端SHA核对一致。State保持in-progress，仅等待用户发送新帮助消息验收。
