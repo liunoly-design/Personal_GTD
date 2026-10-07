@@ -24,3 +24,5 @@ Baseline: b2beaf8a5dc2869bd78d863fc6cf4daf7c847709
 
 
 部署读回见[交付记录](../../../docs/deployment/f601-help-2026-10-07.md)：release对应7799040，插件loaded、RPC ok、飞书ready/probe成功；host仅改PGTD路径，runtime字节、Wiki、Review调度设置与停用宿主任务保持；模型记录96→96。main实现已推送且远端SHA核对一致。State保持in-progress，仅等待用户发送新帮助消息验收。
+
+21:58收到旧提示反馈后重新只读核对：唯一存储空GTD输入为部署前20:51，原消息API时间一致，最近一小时未读到新消息；当前插件source仍为帮助release且RPC正常。旧/新release隔离复现分别返回needs_instruction/commands_help（旧红、新绿，零真实写入）。已询问用户测试时间；真实验收保持未勾选，不清理旧缓存，不重发生产回执。
