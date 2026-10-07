@@ -36,7 +36,18 @@ export function createFeishuClient({ credentials, fetchImpl = fetch, timeoutMs =
     if (typeof id !== 'string' || !/^om_[\w-]+$/u.test(id)) throw new Error('Invalid Feishu message ID');
     return id;
   }
+  function chatId(id){if(typeof id!=='string'||!/^oc_[\w-]+$/u.test(id))throw new Error('Invalid Feishu chat ID');return id;}
   return {
+    async send({conversationId,text,uuid},{signal}={}){
+      const id=chatId(conversationId);if(typeof text!=='string'||Buffer.byteLength(text)>30000||! /^[a-f0-9]{32}$/u.test(uuid??''))throw new Error('Invalid message');
+      const value=await request('im/v1/messages?receive_id_type=chat_id',{receive_id:id,msg_type:'text',content:JSON.stringify({text}),uuid},await auth(signal),signal);return value.data;
+    },
+    async listMessages({conversationId,startTime,endTime,pageToken},{signal}={}){
+      const id=chatId(conversationId);if(!Number.isSafeInteger(startTime)||!Number.isSafeInteger(endTime)||endTime<=startTime||endTime-startTime>3660
+        ||(pageToken!==undefined&&(typeof pageToken!=='string'||pageToken.length>2048)))throw new Error('Invalid read range');
+      const query=new URLSearchParams({container_id_type:'chat',container_id:id,start_time:String(startTime),end_time:String(endTime),sort_type:'ByCreateTimeAsc',page_size:'50',...(pageToken?{page_token:pageToken}:{})});
+      return (await request('im/v1/messages?'+query,null,await auth(signal),signal)).data;
+    },
     async getMessage(id, { signal } = {}) {
       const path = 'im/v1/messages/' + messageId(id) + '?user_id_type=open_id';
       const value = await request(path, null, await auth(signal), signal);

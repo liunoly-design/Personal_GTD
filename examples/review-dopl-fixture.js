@@ -1,6 +1,6 @@
 import { openFeishuCapture } from '../src/feishu-capture.js';
 // Only external Feishu and Notes are substitutes. Persistence and routing are real.
-export function doplFixture(directory, { bridgeFailure, beforeBridge, config: overrides = {}, bridge: providedBridge } = {}) {
+export function doplFixture(directory, { bridgeFailure, beforeBridge, config: overrides = {}, bridge: providedBridge, now, sendFailure, beforeSend, getMessageFailure, listMessages } = {}) {
   const config = {accountId:'default',entryAgentId:'xiaojie',allowedSenderIds:['ou_test','ou_other'],allowedConversationIds:['oc_test','oc_other'],
     enabledModules:['review'],timeZone:'Asia/Shanghai',review:{account:'synthetic',folder:'Notes',year:2026,allowCreate:true,writeEnabled:true},...overrides};
   const notes=[], messages=new Map(), sent=[], operations=[];
@@ -18,13 +18,18 @@ export function doplFixture(directory, { bridgeFailure, beforeBridge, config: ov
       value={...n};}
     bridgeFailure?.(r,value);return value;
   });
-  const feishu={getMessage:async id=>messages.get(id),reply:async input=>{const r={message_id:'om_review_bot_'+(sent.length+1),chat_id:input.conversationId};sent.push({...input,...r});return r;}};
+  const feishu={getMessage:async id=>{getMessageFailure?.(id);return messages.get(id);},reply:async input=>{const r={message_id:'om_review_bot_'+(sent.length+1),chat_id:input.conversationId};sent.push({...input,...r});return r;}};
   let capture;
-  const make=()=>openFeishuCapture({stateDir:directory,config,feishu,notesBridge:bridge,analyze:()=>{throw new Error('MODEL_MUST_NOT_RUN');}});
+  feishu.send=async input=>{beforeSend?.(input);const r={message_id:'om_review_auto_'+(sent.length+1),chat_id:input.conversationId};
+      const m={...r,sender:{sender_type:'app'},msg_type:'text',create_time:String(Date.parse(now?.()??'2026-10-06T21:00:00+08:00')),body:{content:JSON.stringify({text:input.text})}};
+      sent.push({...input,...r});messages.set(r.message_id,m);sendFailure?.(input,r);return r;};
+  feishu.listMessages=listMessages??(async()=>({items:[...messages.values()].filter(m=>m.sender?.sender_type==='app'),has_more:false}));
+  const make=()=>openFeishuCapture({stateDir:directory,config,feishu,now,notesBridge:bridge,analyze:()=>{throw new Error('MODEL_MUST_NOT_RUN');}});
   capture=make();
   return {config,notes,operations,sent,messages,bridge,
     async send(id,text,{parent,sender='ou_test',chat='oc_test',sentAt='2026-10-06T10:00:00+08:00'}={}){
       messages.set(id,{message_id:id,chat_id:chat,sender:{id:sender,id_type:'open_id',sender_type:'user'},msg_type:'text',create_time:String(Date.parse(sentAt)),body:{content:JSON.stringify({text})},...(parent?{parent_id:parent}:{})});
       return capture.handle({Provider:'feishu',AccountId:'default',AgentId:'xiaojie',SenderId:sender,NativeChannelId:chat,MessageSid:id,rawText:text,...(parent?{ReplyToId:parent}:{})});},
+    tick:()=>capture.tickReview(),
     async restart(){await capture.close();capture=make();},recover:()=>capture.recover(),close:()=>capture.close()};
 }

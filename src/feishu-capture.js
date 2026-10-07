@@ -2,6 +2,7 @@ import { completeTask } from './actions/complete-task.js';
 import {maintenanceControl,proposeTaskPlan,executeTaskPlan} from './actions/task-maintenance.js';
 import { selectionCandidate, taskSelection, selectTasks } from './actions/select-tasks.js';
 import { taskQuery, queryTasks, validateQueryConfig } from './actions/query-tasks.js';
+import {openReviewSchedule} from './review-schedule.js';
 import { openReviewDopl } from './review-dopl.js';
 import { openOkrSession } from './okr-session.js';
 import { explicitEntry, okrInstruction, validateEntryActivation, gtdGuard, legacyOkrInstruction } from './explicit-entries.js';
@@ -89,7 +90,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       return value;
     },
   };
-  let capture, okr, review;
+  let capture, okr, review, reviewSchedule;
   try {
     const scopedReminders = {
       listLists: ({ signal } = {}) => reminders.listLists(options(signal)),
@@ -113,6 +114,9 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     }
     if (modules.includes('gtd')) capture = openDurableCapture({ journalPath: join(stateDir, 'capture.sqlite'), reminders: scopedReminders, receipts, analyze: scopedAnalyze,
       config: { ...config, externalTimeoutMs: 20000 }, now });
+    reviewSchedule=openReviewSchedule({store,config,review,feishu,now,installLink(messageId,run){
+      store.set('reply:'+messageId,{senderId:run.senderId,conversationId:run.conversationId,rootId:run.id,route:'review',reviewLink:run.reviewLink});
+    }});
     store.set('account', config.accountId);
   } catch (error) { void okr?.close(); void review?.close(); store.close(); throw error; }
   async function handle(ctx) {
@@ -201,7 +205,8 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
     } else if (isReview) {
       result = !review || !modules.includes('review') ? {status:'review_unavailable',receipt:'Review尚未配置/启用，请配置每日心得保存位置；本次未读写。'}
         : event.type !== 'text' ? {status:'review_help',receipt:'每日心得仅支持文字，本次未读写。'}
-        : await review.handle({...event,text:prefix?command:event.text,link:parentReceipt?.route==='review' && parentReceipt.senderId===event.senderId && parentReceipt.conversationId===event.conversationId?parentReceipt.reviewLink:undefined});
+        : await reviewSchedule.control(event,prefix?command:event.text) ?? await review.handle({...event,text:prefix?command:event.text,link:parentReceipt?.route==='review' && parentReceipt.senderId===event.senderId && parentReceipt.conversationId===event.conversationId?parentReceipt.reviewLink:undefined});
+      if(result.registration){result.registration.schedule=reviewSchedule.state();const s=result.registration.schedule;result.receipt+='\n自动询问：'+(s?`${s.enabled?'启用':'暂停'}；北京时间${s.time??'未确定'}；待核对发送${s.unknown}`:'未配置');}
       store.set('source:'+id,{...store.get('source:'+id),reviewLink:result.reviewLink});
       store.set('routed-result:'+id,{event,result});
       return deliverRouted(event,result);
@@ -318,6 +323,7 @@ export function openFeishuCapture({ stateDir, config, reminders, feishu, analyze
       const input = Object.fromEntries(fields.map(name => [name, ctx[name]]));
       return enqueue(() => handle(input), signal);
     },
+    tickReview() {return enqueue(()=>reviewSchedule.tick());},
     recover() { return enqueue(async () => {
       const results = capture ? await capture.recover() : [];
       for(const [,plan]of (modules.includes('gtd') ? store.entries('maintenance:') : []).filter(([,p])=>p.state==='running').slice(0,1)) {

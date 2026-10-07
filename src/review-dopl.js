@@ -173,9 +173,11 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
       if(year!==config.year&&!annualNotes[year])return finish({status:'review_year_unbound',receipt:`${targetDate}年度${year}-DOPL未绑定；请维护者明确配置该年度现有笔记的真实ID，未新建或写入。`});
       const n=await read(year);if(text==='记录心得'){
         const version=randomUUID(),result={status:'review_question',date:targetDate,reviewLink:{kind:'question',version},receipt:`${targetDate}记录心得，任选一个问题回答即可：\n1. 今天哪件事最值得记住？\n2. 你从中学到了什么，或有什么新的感受？\n3. 这对接下来的行动有什么启发？\n回复这条消息直接在年度笔记末尾追加独立记录，标注心得日期和回复时间，保留旧原文。回复“取消”结束。`};
+        store.set('asked:'+sessionKey,targetDate);
         store.set(sessionKey,{phase:'question',quick:true,version,date:targetDate,noteBody:n.body,result});return finish(result);
       }
       const dup=duplicate(n,targetDate);if(dup)return finish(dup);
+      store.set('asked:'+sessionKey,targetDate);
       const version=randomUUID();store.set(sessionKey,{phase:'question',version,date:targetDate,noteBody:n.body,result:{status:'review_question',date:targetDate,reviewLink:{kind:'question',version},receipt:`${targetDate}的每日一点心得是什么？请回复这条消息提供原文；我会先展示草案，确认后保存。`}});
       return finish(store.get(sessionKey).result);
     }
@@ -220,5 +222,5 @@ export function openReviewDopl({statePath,config,bridge,timeZone='Asia/Shanghai'
     return finish({status:'review_error',code,receipt:`每日心得未确认完成。原因：${code}。${store.get('pending')?'已保留原文与待核对写入，请保持备忘录可见，发送“小婕 review 续接”只读核对；不自动重写。':code==='CONFLICT'?`备忘录已被修改，原文草案保留；请重新发送“小婕 review ${session?.quick?'记录心得':session?.date?'补记 '+session.date:'每日心得'}”读取最新内容后确认。`:code==='UNSUPPORTED_ENTRY'?'已有条目缺少可信结束标记，无法确认替换范围；原文保留，请维护者核对该日期条目边界后重新发起。':'配置/问答进度保留，未宣称保存成功。请处理权限或位置问题后重新发起；未知创建不得新建替代笔记。'}`});
   }
  }
- return {handle(event){if(closed)throw new Error('Review closed');const task=queue.then(()=>processEvent(event));queue=task.catch(()=>{});return task;},async close(){if(closed)return;closed=true;await queue;if(store.get('owner')?.token===token)store.set('owner',null);store.close();}};
+ return {scheduleState(senderId,conversationId){const key='session:'+hash([senderId,conversationId]);return {registered:Boolean(store.get('registration')),active:Boolean(store.get(key)),pending:Boolean(store.get('pending')),lastAsked:store.get('asked:'+key)};},handle(event){if(closed)throw new Error('Review closed');const task=queue.then(()=>processEvent(event));queue=task.catch(()=>{});return task;},async close(){if(closed)return;closed=true;await queue;if(store.get('owner')?.token===token)store.set('owner',null);store.close();}};
 }

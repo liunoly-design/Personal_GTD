@@ -504,3 +504,21 @@ npm run verify:review-query -- PRIVATE_RUNTIME PRIVATE_STATE NEW_PRIVATE_DESTINA
 ```
 
 最后一条从已有注册状态生成隔离快照，只读授权Notes，不发送飞书；不要提交私有配置、状态和原文。证据见 [F612验收](docs/deployment/f612-query-2026-10-07.md)。
+
+## 每日自动询问 Review（F620/T01）
+
+一个已注册DOPL可在北京时间指定时刻自动发送三个引导问题；回复该飞书问题直接独立追加原文及回复时间。自动触发不保存心得、不调用模型。未答复不催促、不堆积；手动新问题可替代旧问题。持久日期去重，宕机只在同日时刻后30分钟补跑；暂停错过时刻不补跑。发送未知时只读核对，绝不盲重发。
+
+私有runtime配置 `review.daily`：`enabled`、`time`（24小时HH:mm）、`senderId`、`conversationId`，目标须在现有白名单；只支持Asia/Shanghai。首次启用须先确定用户时刻，再安装宿主任务。无时刻可配置`enabled:false`且省略`time`，准备停用任务。
+
+```bash
+npm run test:review-schedule
+npm run demo:review-schedule
+npm run install:review-schedule -- PRIVATE_HOST_CONFIG --disabled
+# 已确认时刻、目标及启用配置后，在确切部署快照目录执行：
+npm run install:review-schedule -- PRIVATE_HOST_CONFIG
+```
+
+宿主OpenClaw命令任务每分钟调用管理员RPC `personal-gtd.review.tick`，插件检查实际时钟；零模型，状态库由网关独占。首次安装停用任务后，需维护者在确认时刻后启用宿主任务；启用后可在飞书使用`小婕 review 查询自动询问`、`设置自动询问 HH:mm`、`暂停自动询问`、`恢复自动询问`、`核对自动询问`。暂停日度询问保留宿主轻量检查和当前问题。配置权限/绑定变更立即阻止旧运行，重新加载网关后生效。日志最多1000日；满容量由维护者归档后再配置，不自动删除未知状态。
+
+详见 [日度调度验收](docs/deployment/f620-daily-2026-10-07.md)。真实周期和用户回复闭环与合成演示分别记录。

@@ -383,7 +383,7 @@ test('真实插件公开hook接管无前缀编号回复，生成待确认计划�
   await dispatch(f,'om_hook_query','小婕 gtd 查询任务');const replyId=f.sent.at(-1).message_id;
   const text='第1项移动到Next清单';f.messages.set('om_hook_select',message('om_hook_select',text,{parent_id:replyId}));
   let hook;const hostReplies=[],processed=[];
-  createPlugin({openRuntime:async()=>f.capture}).register({pluginConfig:{...scope,enabled:true},config:{},registerService(){},logger:{info(){},warn(){}},on(name,fn){assert.equal(name,'reply_dispatch');hook=fn;}});
+  createPlugin({openRuntime:async()=>f.capture}).register({pluginConfig:{...scope,enabled:true},config:{},registerService(){},registerGatewayMethod(){},logger:{info(){},warn(){}},on(name,fn){assert.equal(name,'reply_dispatch');hook=fn;}});
   const result=await hook({ctx:{...context('om_hook_select',text),ReplyToId:replyId},sendPolicy:'allow'}, {
     recordProcessed(...args){processed.push(args);},markIdle(){},dispatcher:{getQueuedCounts(){return{};},sendFinalReply(reply){hostReplies.push(reply);return true;}}});
   assert.equal(result.handled,true);assert.equal(result.queuedFinal,false);

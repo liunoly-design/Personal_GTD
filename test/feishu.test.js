@@ -520,7 +520,7 @@ test('插件接管三个明确入口，Review 不可用也结束宿主派发且�
   let hook;
   const processed = [], hostReplies = [];
   createPlugin({ openRuntime: async () => f.capture }).register({ pluginConfig: { ...scope, enabled: true }, config: {},
-    logger: { info() {}, warn() {} }, registerService() {}, on(name, fn) { assert.equal(name, 'reply_dispatch'); hook = fn; } });
+    logger: { info() {}, warn() {} }, registerService() {}, registerGatewayMethod() {}, on(name, fn) { assert.equal(name, 'reply_dispatch'); hook = fn; } });
   const host = { recordProcessed(...args) { processed.push(args); }, markIdle() {},
     dispatcher: { getQueuedCounts() { return {}; }, sendFinalReply(input) { hostReplies.push(input); return true; } } };
   for (const [i, text] of ['小婕 gtd 买牛奶', '小婕 okr 讨论', '小婕 review 日复盘'].entries()) {

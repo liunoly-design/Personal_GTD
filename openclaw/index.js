@@ -12,6 +12,12 @@ export function createPlugin({ openRuntime = defaultOpenRuntime } = {}) {
       api.registerService({ id: 'personal-gtd', start() {}, async stop() {
         if (runtime) { const active = await runtime.catch(() => null); await active?.close(); }
       } });
+      api.registerGatewayMethod('personal-gtd.review.tick',async({params,respond})=>{
+        if(Object.keys(params??{}).length){respond(false,undefined,{code:'INVALID_REQUEST',message:'No parameters accepted'});return;}
+        try{runtime??=openRuntime({config,hostConfig:api.config});const result=await (await runtime).tickReview();
+          respond(true,{status:result.status,...(result.date?{date:result.date}:{}),...(result.code?{code:result.code}:{}),modelCalls:0});
+        }catch{respond(false,undefined,{code:'UNAVAILABLE',message:'Review scheduler unconfirmed; inspect private state'});}
+      },{scope:'operator.admin'});
       api.on('reply_dispatch', async (event, context) => {
         if (!acceptsFeishuContext(event.ctx, config)) return;
         const finish = (status, queuedFinal = false) => {

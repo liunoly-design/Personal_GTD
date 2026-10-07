@@ -40,7 +40,12 @@ export async function openRuntime({ config, hostConfig, googleKey = openClawGoog
     if (modules.includes('gtd')) reminders = openAppleReminders({ sourceId: runtime.sourceId, listId: runtime.listId, helperPath: runtime.remindersHelperPath, statePath: join(config.stateDir, 'adapter.sqlite') });
     capture = openFeishuCapture({ stateDir: config.stateDir, config: { ...runtime, ...config, modelIntents: true },
       reminders, feishu, analyze: model?.analyze, notesBridge: callNotes, okrGuide: model?.discussOkr });
-    return { handle: (ctx, options) => capture.handle(ctx, options), recover: () => capture.recover(), async close() {
+    return { async tickReview(){
+      const current=JSON.parse(await readFile(config.runtimeConfigPath,'utf8'));
+      if(!enabledModules({...current,...config}).includes('review')||current.review?.readEnabled===false||current.review?.writeEnabled!==true
+        ||JSON.stringify(current.review)!==JSON.stringify(runtime.review))return {status:'review_schedule_forbidden'};
+      return capture.tickReview();
+    },handle: (ctx, options) => capture.handle(ctx, options), recover: () => capture.recover(), async close() {
       await capture.close(); reminders?.close(); await model?.close();
     } };
   } catch (error) { await capture?.close(); reminders?.close(); await model?.close(); throw error; }
