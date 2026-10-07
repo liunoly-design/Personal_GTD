@@ -14,7 +14,7 @@ const key='personal-gtd-dopl-daily-v1',root=resolve(import.meta.dirname,'..'),ar
 const list=call(['cron','list','--all','--json']),matches=(list.jobs??[]).filter(j=>j.declarationKey===key||j.name===key);
 if(matches.length>1)throw new Error('AMBIGUOUS_HOST_REVIEW_JOB');
 const common=['--cron','* * * * *','--tz','Asia/Shanghai','--command-argv',JSON.stringify(argv),'--command-cwd',root,'--timeout-seconds','180','--output-max-bytes','2048','--no-deliver','--json'];
-const value=matches.length?call(['cron','edit',matches[0].id,...common,'--stagger','0ms',disabled?'--disable':'--enable']):call(['cron','add','--name',key,'--declaration-key',key,'--exact',...common,...(disabled?['--disabled']:[])]);
+const value=matches.length?call(['cron','edit',matches[0].id,...common,disabled?'--disable':'--enable']):call(['cron','add','--name',key,'--declaration-key',key,'--exact',...common,...(disabled?['--disabled']:[])]);
 const job=value.job??value,id=job.id??matches[0]?.id;if(!id)throw new Error('HOST_JOB_RESULT_UNKNOWN');
 const readback=call(['cron','get',id,'--json']),after=readback.job??readback;
 if(after.enabled!==!disabled||after.payload?.kind!=='command')throw new Error('HOST_JOB_READBACK_FAILED');
